@@ -58,17 +58,19 @@ from there; the node appears under **Color/Math > Expression**.
 The UI is split into four pages:
 
 - **Channels** — the four output expressions `r =` `g =` `b =` `a =`.
-- **Variables** — four `var N name` / `var N =` rows: name a value **derived by a
-  formula** (luminance, a vignette falloff, …) and reuse it in the channels.
-  Evaluated top to bottom before the channels — exactly like Nuke's temporaries.
-- **Constants** — four animatable knobs `k1..k4`, each with an optional **`kN name`**
-  alias, plus the **Reference Colour**. The slider drives the value; the name is a
-  friendly token for it. Name `k1` "gamma" and both `gamma` and `k1` resolve to that
-  slider in any expression.
+- **Variables** — one multi-line block, **one `name = expression` per line**,
+  evaluated top to bottom before the channels (so a later line can use an earlier
+  one). It carries both kinds of named token:
+  - `gamma = k1` — a **named constant** driven by the `k1` slider;
+  - `lum = 0.2126*r + 0.7152*g + 0.0722*b` — a **derived variable** computed from
+    the image.
+  Then use those names in the channels. Blank lines and lines starting with `#` are
+  ignored. (One self-labelling box, so it stays clean even on hosts — like Flame —
+  that don't render labels for text fields.)
+- **Constants** — four animatable knobs `k1..k4`, plus the **Reference Colour**
+  (`ref.r/.g/.b`). Reference them directly as `k1..k4`, or alias one in the
+  Variables block for a friendly name.
 - **Output** — **Mix** (blend original↔result) and **Clamp Output**.
-
-So there are two kinds of named token: a **Variable** is *computed* (name + formula),
-a **Constant** is *dialed* (name + slider). Both are usable anywhere in the channels.
 
 ### Predefined variables
 
@@ -81,9 +83,8 @@ a **Constant** is *dialed* (name + slider). Both are usable anywhere in the chan
 | `frame` / `t`    | Current frame (render time); `t` is a Nuke-parity alias    |
 | `pi e`           | Constants (also callable as `pi()` `e()`)                 |
 | `k1 k2 k3 k4`    | Constant knobs (Constants page; `k1` defaults to 1, rest 0) |
-| *your `kN` aliases* | Whatever you name a constant knob (e.g. `gamma`)         |
 | `ref.r ref.g ref.b` | The Reference Colour knob (RGB), default `0`            |
-| *your variables* | Whatever you name in the Variables rows                    |
+| *your variables* | Whatever you declare in the Variables block (incl. `k`-aliases) |
 
 The `k1..k4`/aliases, `ref`, **Mix** and **Clamp Output** mirror the companion
 Matchbox build, so the OFX is a superset: type any expression *and* drive it live

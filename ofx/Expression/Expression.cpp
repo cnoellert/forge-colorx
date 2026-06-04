@@ -166,9 +166,6 @@ static inline unsigned short floatToHalf(float f)
 #define kPluginVersionMajor 1
 #define kPluginVersionMinor 0
 
-// number of temp-variable rows, matching Nuke's Expression tab
-#define kNumTemps 4
-
 // indices of the fixed predefined variables in the variable buffer. r..frame are
 // per-pixel / per-render; k1..k4 and ref.r/.g/.b are the user-constant knobs
 // (uniform across the frame) that bring the OFX in line with the Matchbox build.
@@ -312,19 +309,9 @@ public:
         _exprG = fetchStringParam("exprG");
         _exprB = fetchStringParam("exprB");
         _exprA = fetchStringParam("exprA");
-        for (int t = 0; t < kNumTemps; ++t) {
-            char n[16], e[16];
-            std::sprintf(n, "tempName%d", t);
-            std::sprintf(e, "tempExpr%d", t);
-            _tempName[t] = fetchStringParam(n);
-            _tempExpr[t] = fetchStringParam(e);
-        }
+        _vars  = fetchStringParam("vars");
         _k1 = fetchDoubleParam("k1"); _k2 = fetchDoubleParam("k2");
         _k3 = fetchDoubleParam("k3"); _k4 = fetchDoubleParam("k4");
-        for (int i = 0; i < 4; ++i) {
-            char n[16]; std::sprintf(n, "kName%d", i + 1);
-            _kName[i] = fetchStringParam(n);
-        }
         _ref = fetchRGBParam("ref");
         _mix = fetchDoubleParam("mix");
         _clamp = fetchBooleanParam("clampOutput");
@@ -353,15 +340,36 @@ private:
     OFX::Clip*        _srcClip;
     OFX::StringParam* _exprR; OFX::StringParam* _exprG;
     OFX::StringParam* _exprB; OFX::StringParam* _exprA;
-    OFX::StringParam* _tempName[kNumTemps];
-    OFX::StringParam* _tempExpr[kNumTemps];
+    OFX::StringParam* _vars;              // multi-line "name = expression" block
     OFX::DoubleParam* _k1; OFX::DoubleParam* _k2;
     OFX::DoubleParam* _k3; OFX::DoubleParam* _k4;
-    OFX::StringParam* _kName[4];          // optional alias names for k1..k4
     OFX::RGBParam*    _ref;
     OFX::DoubleParam* _mix;
     OFX::BooleanParam* _clamp;
 };
+
+static std::string trimws(const std::string& s)
+{
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return std::string();
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+
+// A user variable name: a plain identifier (letters/digits/underscore, not starting
+// with a digit). Keeps names unambiguous in expressions; ref.r etc. are predefined.
+static bool validIdent(const std::string& s)
+{
+    if (s.empty()) return false;
+    char c0 = s[0];
+    if (!((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || c0 == '_')) return false;
+    for (size_t i = 1; i < s.size(); ++i) {
+        char c = s[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_')) return false;
+    }
+    return true;
+}
 
 void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContext& ctx)
 {
@@ -371,45 +379,49 @@ void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContex
           "k1","k2","k3","k4","ref.r","ref.g","ref.b" };
     ctx.names.assign(fixed, fixed + V_FIXED_COUNT);
 
-    // Build the derived bindings, evaluated in order before the channels. (names_
-    // stores the address of the ctx.names vector object, which is stable across the
-    // push_backs below, so compiling against the growing list is safe.)
+    // Build the derived bindings from the multi-line Variables block — one
+    // "name = expression" per line, evaluated in order before the channels so a
+    // later line can use an earlier one (and any line can use k1..k4 / ref.r..).
+    // This is both kinds of named token in one field: `gamma = k1` is a named
+    // constant driven by the slider; `lum = 0.2126*r+...` is a derived variable.
+    // Blank lines and lines starting with '#' are ignored. (names_ stores the
+    // address of the ctx.names vector object, stable across push_backs, so
+    // compiling against the growing list is safe.)
     ctx.derived.clear();
     ctx.derivedSlot.clear();
     std::string err;
 
-    // (1) Named constants: an optional alias for each k-knob. If you name k1
-    // "gamma", then `gamma` becomes a token whose value is driven by the k1 slider
-    // (its program is simply "k1"). k1..k4 always work too.
-    for (int i = 0; i < 4; ++i) {
-        std::string knm; _kName[i]->getValueAtTime(args.time, knm);
-        if (knm.empty()) continue;
-        int slot = (int)ctx.names.size();
-        ctx.names.push_back(knm);
-        char src[8]; std::sprintf(src, "k%d", i + 1);
-        expreval::Program p;
-        if (!p.compile(src, ctx.names, err)) {   // can't realistically fail
+    std::string varsSrc;
+    _vars->getValueAtTime(args.time, varsSrc);
+    size_t pos = 0; int lineNo = 0;
+    while (pos < varsSrc.size()) {
+        size_t eol = varsSrc.find('\n', pos);
+        std::string line = varsSrc.substr(pos, (eol == std::string::npos) ? std::string::npos : eol - pos);
+        pos = (eol == std::string::npos) ? varsSrc.size() : eol + 1;
+        ++lineNo;
+        line = trimws(line);
+        if (line.empty() || line[0] == '#') continue;
+
+        char ln[16]; std::sprintf(ln, "%d", lineNo);
+        size_t eq = line.find('=');
+        if (eq == std::string::npos) {
             try { setPersistentMessage(OFX::Message::eMessageError, "",
-                "Constant '" + knm + "': " + err); } catch (...) {}
+                std::string("Variables line ") + ln + ": expected 'name = expression'"); } catch (...) {}
             OFX::throwSuiteStatusException(kOfxStatFailed);
         }
-        ctx.derivedSlot.push_back(slot);
-        ctx.derived.push_back(p);
-    }
-
-    // (2) Named variables: name + formula (a value derived from the image / other
-    // vars), evaluated in order so a later variable can use an earlier one.
-    for (int t = 0; t < kNumTemps; ++t) {
-        std::string tname, texpr;
-        _tempName[t]->getValueAtTime(args.time, tname);
-        _tempExpr[t]->getValueAtTime(args.time, texpr);
-        if (tname.empty()) continue;
-        int slot = (int)ctx.names.size();
-        ctx.names.push_back(tname);
-        expreval::Program p;
-        if (!p.compile(texpr, ctx.names, err)) {
+        std::string name = trimws(line.substr(0, eq));
+        std::string expr = trimws(line.substr(eq + 1));
+        if (!validIdent(name)) {
             try { setPersistentMessage(OFX::Message::eMessageError, "",
-                "Variable '" + tname + "': " + err); } catch (...) {}
+                std::string("Variables line ") + ln + ": '" + name + "' is not a valid name"); } catch (...) {}
+            OFX::throwSuiteStatusException(kOfxStatFailed);
+        }
+        int slot = (int)ctx.names.size();
+        ctx.names.push_back(name);
+        expreval::Program p;
+        if (!p.compile(expr, ctx.names, err)) {
+            try { setPersistentMessage(OFX::Message::eMessageError, "",
+                "Variable '" + name + "': " + err); } catch (...) {}
             OFX::throwSuiteStatusException(kOfxStatFailed);
         }
         ctx.derivedSlot.push_back(slot);
@@ -741,48 +753,36 @@ void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc
     defineExprParam(desc, pgChan, "exprB", "b =", "b");
     defineExprParam(desc, pgChan, "exprA", "a =", "a");
 
-    // --- Variables: name + formula. A value DERIVED from the image (or earlier
-    //     variables/constants). Name it, then use that name in the channels. ---
-    for (int t = 0; t < kNumTemps; ++t) {
-        char n[16], e[16], ln[24], le[28];
-        std::sprintf(n, "tempName%d", t);
-        std::sprintf(e, "tempExpr%d", t);
-        std::sprintf(ln, "var %d name", t + 1);
-        std::sprintf(le, "var %d  =", t + 1);
-        OFX::StringParamDescriptor* pn = desc.defineStringParam(n);
-        pn->setLabel(ln);
-        pn->setStringType(OFX::eStringTypeSingleLine);
-        pn->setDefault("");
-        pn->setHint("Name a derived variable (blank = row off); use the name in your channel expressions.");
-        pn->setAnimates(false);
-        pgVars->addChild(*pn);
-        defineExprParam(desc, pgVars, e, le, "");
+    // --- Variables: ONE multi-line block, one "name = expression" per line,
+    //     evaluated top to bottom before the channels. Holds both kinds of named
+    //     token: `gamma = k1` (a named constant driven by the slider) and
+    //     `lum = 0.2126*r+...` (a value derived from the image). Self-labelling, so
+    //     it stays clean even on hosts that don't render text-field labels. ---
+    {
+        OFX::StringParamDescriptor* v = desc.defineStringParam("vars");
+        v->setLabel("variables");
+        v->setStringType(OFX::eStringTypeMultiLine);
+        v->setDefault("# one per line:  name = expression  (e.g.  gamma = k1)");
+        v->setHint("Declare variables, one 'name = expression' per line; use the names in your "
+                   "channel expressions. Reference knobs as k1..k4 (e.g. gamma = k1). "
+                   "Blank lines and lines starting with # are ignored.");
+        v->setAnimates(false);
+        pgVars->addChild(*v);
     }
 
-    // --- Constants: animatable k-knobs, each with an optional alias name. The
-    //     slider drives the value; the name is a friendly token for it. Name k1
-    //     "gamma" and `gamma` resolves to the k1 slider (k1..k4 always work). ---
+    // --- Constants: animatable k-knobs. Reference them as k1..k4, or alias one in
+    //     the Variables block (e.g. gamma = k1) to use a friendly name. ---
     for (int i = 0; i < 4; ++i) {
-        char nm[16], lnm[16], kn[8], lk[8];
-        std::sprintf(nm, "kName%d", i + 1);
-        std::sprintf(lnm, "k%d name", i + 1);
+        char kn[8], lk[8];
         std::sprintf(kn, "k%d", i + 1);
         std::sprintf(lk, "k%d", i + 1);
-        OFX::StringParamDescriptor* pn = desc.defineStringParam(nm);
-        pn->setLabel(lnm);
-        pn->setStringType(OFX::eStringTypeSingleLine);
-        pn->setDefault("");
-        pn->setHint("Optional alias for this knob, e.g. name it 'gamma' and use gamma in expressions.");
-        pn->setAnimates(false);
-        pgConst->addChild(*pn);
-
         OFX::DoubleParamDescriptor* p = desc.defineDoubleParam(kn);
         p->setLabel(lk);
         p->setDefault(i == 0 ? 1.0 : 0.0);
         p->setRange(-1e6, 1e6);
         p->setDisplayRange(-1.0, 1.0);
         p->setIncrement(0.001);
-        p->setHint("Animatable scalar; reference as this knob's name or kN in your expressions.");
+        p->setHint("Animatable scalar; reference as kN (or alias it in the Variables block).");
         p->setAnimates(true);
         pgConst->addChild(*p);
     }
