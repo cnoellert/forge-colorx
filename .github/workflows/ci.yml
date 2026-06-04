@@ -82,6 +82,23 @@ jobs:
             tests/test_cuda.cpp -o test_cuda -L"$NVRTC_L" -lnvrtc
           LD_LIBRARY_PATH="$NVRTC_L" ./test_cuda
 
+      # The runtime differential test (test_cuda_run.cpp) needs a real GPU+driver
+      # to *run* (it SKIPs cleanly otherwise) — it's GPU-verified on the NVIDIA box
+      # (RTX 5000 Ada), not here. But compile+link it against the driver API headers
+      # + libcuda stub so CI still gates the driver-API code for signature drift.
+      - name: Compile-link the runtime differential test (driver API)
+        run: |
+          CUDA_H="$(dirname "$(find / -name cuda.h 2>/dev/null | grep -m1 -E '/(include)/cuda\.h$')")"
+          CUDA_STUB="$(dirname "$(find / -name 'libcuda.so' 2>/dev/null | head -1)")"
+          NVRTC_H="$(dirname "$(find / -name nvrtc.h 2>/dev/null | head -1)")"
+          NVRTC_L="$(dirname "$(find / -name 'libnvrtc.so*' 2>/dev/null | head -1)")"
+          echo "cuda.h in: $CUDA_H   libcuda stub in: $CUDA_STUB"
+          test -n "$CUDA_H" && test -n "$CUDA_STUB" || { echo "::error::driver API not found"; exit 1; }
+          c++ -std=c++11 -O2 -I ofx/Expression -I"$NVRTC_H" -I"$CUDA_H" \
+            tests/test_cuda_run.cpp -o test_cuda_run \
+            -L"$NVRTC_L" -lnvrtc -L"$CUDA_STUB" -lcuda
+          echo "test_cuda_run linked OK (driver API); runtime run happens on the GPU box"
+
   build:
     name: build ${{ matrix.name }}
     needs: test
