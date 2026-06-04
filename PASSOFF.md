@@ -128,6 +128,14 @@ These were required to actually run in Resolve and are now in the source:
 
 ### Open loose ends (small)
 
+- **`flame-01`: installed OFX is the CUDA path-marker diagnostic build**
+  (`-DEXPR_PATH_LOG` → appends to `/tmp/expr_path.log` every render; harmless on a
+  testbed but not for production). It's the WITH_CUDA build, so it needs
+  `libnvrtc.so.12` reachable via its baked rpath (the `corridorkey-cuda` conda env)
+  + the system `libcuda.so.1`. Swap in a clean (no-marker) build with the same
+  `make WITH_CUDA=1 …` minus the `-DEXPR_PATH_LOG` in `CUDA_INC`, then
+  `sudo cp -R …/Linux-64-debug/Expression.ofx.bundle /usr/OFX/Plugins/` and the
+  user relaunches Flame. `/tmp/expr_path.log` on `flame-01` is throwaway evidence.
 - Throwaway test scaffolding to delete: Flame batch groups **`FCX_OFX_TEST`** and
   **`FCX_METAL_TEST`** on the portofino desktop; Resolve project **`FCX_METAL_TEST`**
   (timeline + Fusion comp); `/tmp/fcx_metal*.exr` and `/tmp/fcx_flame_*.exr`;
@@ -320,10 +328,19 @@ CPU evaluator is the **numeric oracle** for every target.
      Linux `.ofx.bundle` builds + links (ELF x86-64, exports `OfxGetPlugin`, NEEDS
      `libnvrtc.so.12` + `libcuda.so.1`, both resolve). CI `cuda` job now also
      compile-links `ExprCuda.cpp` + the pixel test against the driver API.
-     ⏭ **Still open:** in-host verify of the CUDA path in **Linux Resolve** (the
-     analogue of the Metal Resolve verification — needs Resolve on `flame-01` + a
-     user-driven render; paths in [[flame-01-linux-testbed]]); then drop
-     `cuStreamSynchronize` for async dispatch per the OFX spec.
+     ✅ **Flame CPU-load safety check — DONE (Linux Flame 2026.2.1, `flame-01`).**
+     The CUDA-enabled path-marker bundle (NEEDs `libnvrtc.so.12` + `libcuda.so.1`)
+     **loads and renders in Linux Flame with no crash and no regression**: OFX cache
+     re-registered `tv.diff.Expression`, app log clean `Instanciating` (no
+     `kOfxStatFailed`), and the marker logged `host=com.autodesk.flame cudaEnabled=0
+     branch=cpu` — the host-gate keeps Flame off CUDA exactly as designed (the
+     analogue of the Metal/Flame check; the new CUDA `NEEDED` libs don't break
+     Flame's dlopen). `cudaRender()`/`cuInit` never run in Flame (CPU branch), so no
+     CUDA context is ever created there.
+     ⏭ **Still open:** in-host verify of the CUDA *render path* itself in **Linux
+     Resolve Studio** (the analogue of the Metal Resolve verification — Resolve is
+     **not installed on `flame-01`**, and OFX needs Resolve *Studio*; paths in
+     [[flame-01-linux-testbed]]); then drop `cuStreamSynchronize` for async dispatch.
 - **Phase 4:** wire GPU into `render()` with CPU fallback; close GLSL/Matchbox.
 
 OFX GPU refs: `openfx/include/ofxGPURender.h`, and the OpenFX/Support GPU bits.
@@ -369,11 +386,16 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Session history (newest first)
 
+- GPU Phase 3 (Flame CPU-load safety check): the CUDA-enabled bundle loads +
+  renders in Linux Flame 2026.2.1 (`flame-01`) on the CPU path — no crash, OFX cache
+  re-registered, marker `cudaEnabled=0 branch=cpu` (host-gate holds; the new
+  nvrtc/cuda NEEDED libs don't break Flame's dlopen). CUDA render-path drive (Linux
+  Resolve Studio) still pending — Resolve not installed on `flame-01`.
 - GPU Phase 3 (render wiring): CUDA render path — `ExprCuda.h/.cpp` driver-API
   bridge + `renderCuda()`/`describe()` in `Expression.cpp` (host-gated to Resolve)
   + `WITH_CUDA=1` Makefile opt-in. Pixel path GPU-verified vs the CPU binding
   (`test_cuda_render.cpp`: exact/~6e-8). CUDA-enabled Linux bundle builds + links +
-  resolves (nvrtc/libcuda). In-host (Linux Resolve) verify still pending.
+  resolves (nvrtc/libcuda).
 - GPU Phase 3 (runtime parity): `test_cuda_run.cpp` driver-API differential —
   GPU-verified on `flame-01` (RTX 5000 Ada): deterministic 5.96e-08, value-noise
   EXACTLY 0, random() 0.0039 (all better than Metal). Found `--fmad=false` is
