@@ -31,6 +31,46 @@
 
 #include "ExprEval.h"
 
+// ---- IEEE-754 half <-> float (Fusion/Resolve deliver 16-bit float images) ----
+static inline float halfToFloat(unsigned short h)
+{
+    unsigned int s = (h >> 15) & 1u, e = (h >> 10) & 0x1fu, m = h & 0x3ffu, out;
+    if (e == 0) {
+        if (m == 0) { out = s << 31; }                       // +/- zero
+        else {                                               // subnormal
+            e = 127 - 15 + 1;
+            while ((m & 0x400u) == 0) { m <<= 1; --e; }
+            m &= 0x3ffu;
+            out = (s << 31) | (e << 23) | (m << 13);
+        }
+    } else if (e == 0x1fu) {                                 // inf / nan
+        out = (s << 31) | (0xffu << 23) | (m << 13);
+    } else {                                                 // normal
+        out = (s << 31) | ((e - 15 + 127) << 23) | (m << 13);
+    }
+    float f; std::memcpy(&f, &out, 4); return f;
+}
+static inline unsigned short floatToHalf(float f)
+{
+    unsigned int x; std::memcpy(&x, &f, 4);
+    unsigned int s = (x >> 16) & 0x8000u;
+    int          e = (int)((x >> 23) & 0xffu) - 127 + 15;
+    unsigned int m = x & 0x7fffffu;
+    if (e <= 0) {                                            // subnormal / underflow
+        if (e < -10) return (unsigned short)s;
+        m |= 0x800000u;
+        int shift = 14 - e;
+        unsigned int hm = m >> shift;
+        if ((m >> (shift - 1)) & 1u) ++hm;                   // round to nearest
+        return (unsigned short)(s | hm);
+    } else if (e >= 0x1f) {                                  // overflow -> inf
+        return (unsigned short)(s | 0x7c00u);
+    }
+    unsigned short hm = (unsigned short)(s | (e << 10) | (m >> 13));
+    if ((m >> 12) & 1u) ++hm;                                // round to nearest
+    return hm;
+}
+
 #define kPluginName        "Expression"
 #define kPluginGrouping    "Color/Math"
 #define kPluginDescription "Per-channel math expressions, a re-creation of Nuke's Expression node.\n" \
@@ -58,7 +98,7 @@ struct ExprContext {
 // ============================================================================
 //  Per-pixel processor (templated on pixel type / component count / max value)
 // ============================================================================
-template <class PIX, int nComps, int maxValue>
+template <class PIX, int nComps, int maxValue, bool HALF = false>
 class ExpressionProcessor : public OFX::ImageProcessor {
 public:
     explicit ExpressionProcessor(OFX::ImageEffect& instance)
@@ -91,12 +131,12 @@ public:
                     PIX* s = (PIX*)_srcImg->getPixelAddress(x, y);
                     if (s) {
                         if (nComps == 1) {              // alpha only
-                            a = s[0] * invMax;
+                            a = HALF ? halfToFloat((unsigned short)s[0]) : s[0] * invMax;
                         } else {                        // RGB or RGBA
-                            r = s[0] * invMax;
-                            g = s[1] * invMax;
-                            b = s[2] * invMax;
-                            if (nComps == 4) a = s[3] * invMax;
+                            r = HALF ? halfToFloat((unsigned short)s[0]) : s[0] * invMax;
+                            g = HALF ? halfToFloat((unsigned short)s[1]) : s[1] * invMax;
+                            b = HALF ? halfToFloat((unsigned short)s[2]) : s[2] * invMax;
+                            if (nComps == 4) a = HALF ? halfToFloat((unsigned short)s[3]) : s[3] * invMax;
                         }
                     }
                 }
@@ -134,6 +174,7 @@ public:
 
 private:
     static PIX convert(double v, bool isFloat) {
+        if (HALF) return (PIX)floatToHalf((float)v);        // 16-bit float, no clamp
         if (isFloat) return (PIX)v;                         // HDR-safe, no clamp
         double s = std::floor(v * maxValue + 0.5);
         if (s < 0) s = 0;
@@ -173,7 +214,7 @@ public:
 private:
     void buildContext(const OFX::RenderArguments& args, ExprContext& ctx);
 
-    template <class PIX, int nComps, int maxValue>
+    template <class PIX, int nComps, int maxValue, bool HALF = false>
     void process(const OFX::RenderArguments& args, const ExprContext& ctx);
 
     OFX::Clip*        _dstClip;
@@ -207,8 +248,8 @@ void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContex
     std::string err;
     for (int t = 0; t < kNumTemps; ++t) {
         if (ctx.tempSlot[t] >= 0 && !ctx.temps[t].compile(texpr[t], ctx.names, err)) {
-            setPersistentMessage(OFX::Message::eMessageError, "",
-                "Temp '" + tname[t] + "': " + err);
+            try { setPersistentMessage(OFX::Message::eMessageError, "",
+                "Temp '" + tname[t] + "': " + err); } catch (...) {}
             OFX::throwSuiteStatusException(kOfxStatFailed);
         }
     }
@@ -221,27 +262,39 @@ void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContex
     static const char* label[4] = { "r", "g", "b", "a" };
     for (int c = 0; c < 4; ++c) {
         if (!ctx.chan[c].compile(es[c], ctx.names, err)) {
-            setPersistentMessage(OFX::Message::eMessageError, "",
-                std::string("Channel ") + label[c] + ": " + err);
+            // setPersistentMessage is wrapped: some hosts (e.g. Resolve's Fusion
+            // OFX) don't implement the message suite and throw on it.
+            try { setPersistentMessage(OFX::Message::eMessageError, "",
+                std::string("Channel ") + label[c] + ": " + err); } catch (...) {}
             OFX::throwSuiteStatusException(kOfxStatFailed);
         }
     }
-    clearPersistentMessage();
+    // Resolve's Fusion OFX host lacks the message suite, so clearPersistentMessage()
+    // throws kOfxStatErrUnsupported there. Swallow it so render() can proceed.
+    try { clearPersistentMessage(); } catch (...) {}
 
-    OfxRectD rod = _dstClip->getRegionOfDefinition(args.time);
+    // getRegionOfDefinition can be unsupported mid-render on some hosts; fall back
+    // to the render window (== full image for a non-tiled host) if it throws.
+    OfxRectD rod;
+    try {
+        rod = _dstClip->getRegionOfDefinition(args.time);
+    } catch (...) {
+        rod.x1 = args.renderWindow.x1; rod.y1 = args.renderWindow.y1;
+        rod.x2 = args.renderWindow.x2; rod.y2 = args.renderWindow.y2;
+    }
     ctx.width  = rod.x2 - rod.x1;
     ctx.height = rod.y2 - rod.y1;
     ctx.frame  = args.time;
 }
 
-template <class PIX, int nComps, int maxValue>
+template <class PIX, int nComps, int maxValue, bool HALF>
 void ExpressionPlugin::process(const OFX::RenderArguments& args, const ExprContext& ctx)
 {
     std::unique_ptr<OFX::Image> dst(_dstClip->fetchImage(args.time));
     std::unique_ptr<OFX::Image> src(_srcClip && _srcClip->isConnected()
                                   ? _srcClip->fetchImage(args.time) : 0);
 
-    ExpressionProcessor<PIX, nComps, maxValue> proc(*this);
+    ExpressionProcessor<PIX, nComps, maxValue, HALF> proc(*this);
     proc.setDstImg(dst.get());
     proc.setSrcImg(src.get());
     proc.setContext(&ctx);
@@ -259,23 +312,26 @@ void ExpressionPlugin::render(const OFX::RenderArguments& args)
 
     if (comps == OFX::ePixelComponentRGBA) {
         switch (depth) {
-            case OFX::eBitDepthUByte:  process<unsigned char,  4, 255>  (args, ctx); break;
-            case OFX::eBitDepthUShort: process<unsigned short, 4, 65535>(args, ctx); break;
-            case OFX::eBitDepthFloat:  process<float,          4, 1>    (args, ctx); break;
+            case OFX::eBitDepthUByte:  process<unsigned char,  4, 255>      (args, ctx); break;
+            case OFX::eBitDepthUShort: process<unsigned short, 4, 65535>    (args, ctx); break;
+            case OFX::eBitDepthHalf:   process<unsigned short, 4, 1, true>  (args, ctx); break;
+            case OFX::eBitDepthFloat:  process<float,          4, 1>        (args, ctx); break;
             default: OFX::throwSuiteStatusException(kOfxStatErrUnsupported);
         }
     } else if (comps == OFX::ePixelComponentRGB) {
         switch (depth) {
-            case OFX::eBitDepthUByte:  process<unsigned char,  3, 255>  (args, ctx); break;
-            case OFX::eBitDepthUShort: process<unsigned short, 3, 65535>(args, ctx); break;
-            case OFX::eBitDepthFloat:  process<float,          3, 1>    (args, ctx); break;
+            case OFX::eBitDepthUByte:  process<unsigned char,  3, 255>      (args, ctx); break;
+            case OFX::eBitDepthUShort: process<unsigned short, 3, 65535>    (args, ctx); break;
+            case OFX::eBitDepthHalf:   process<unsigned short, 3, 1, true>  (args, ctx); break;
+            case OFX::eBitDepthFloat:  process<float,          3, 1>        (args, ctx); break;
             default: OFX::throwSuiteStatusException(kOfxStatErrUnsupported);
         }
     } else if (comps == OFX::ePixelComponentAlpha) {
         switch (depth) {
-            case OFX::eBitDepthUByte:  process<unsigned char,  1, 255>  (args, ctx); break;
-            case OFX::eBitDepthUShort: process<unsigned short, 1, 65535>(args, ctx); break;
-            case OFX::eBitDepthFloat:  process<float,          1, 1>    (args, ctx); break;
+            case OFX::eBitDepthUByte:  process<unsigned char,  1, 255>      (args, ctx); break;
+            case OFX::eBitDepthUShort: process<unsigned short, 1, 65535>    (args, ctx); break;
+            case OFX::eBitDepthHalf:   process<unsigned short, 1, 1, true>  (args, ctx); break;
+            case OFX::eBitDepthFloat:  process<float,          1, 1>        (args, ctx); break;
             default: OFX::throwSuiteStatusException(kOfxStatErrUnsupported);
         }
     } else {
@@ -309,6 +365,7 @@ void ExpressionPluginFactory::describe(OFX::ImageEffectDescriptor& desc)
     desc.addSupportedContext(OFX::eContextGeneral);
     desc.addSupportedBitDepth(OFX::eBitDepthUByte);
     desc.addSupportedBitDepth(OFX::eBitDepthUShort);
+    desc.addSupportedBitDepth(OFX::eBitDepthHalf);
     desc.addSupportedBitDepth(OFX::eBitDepthFloat);
 
     desc.setSingleInstance(false);

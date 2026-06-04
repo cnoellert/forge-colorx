@@ -13,10 +13,9 @@
 
 PLUGINNAME = Expression
 
-# Plugin object + the OFX C++ Support library objects (built from openfx sources)
-PLUGINOBJECTS = Expression.o \
-                ofxsCore.o ofxsImageEffect.o ofxsInteract.o ofxsLog.o \
-                ofxsMultiThread.o ofxsParams.o ofxsProperty.o ofxsPropertyValidation.o
+# Just our plugin object. The OFX C++ Support library objects are supplied
+# separately by Makefile.master (as SUPPORTOBJECTS) and linked in automatically.
+PLUGINOBJECTS = Expression.o
 
 # Anything in this list is copied into Contents/Resources of the bundle.
 RESOURCES =

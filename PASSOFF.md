@@ -42,16 +42,41 @@ forge-colorx/
   `&&`/`||`, clamp/min/max/lerp/smoothstep, trig, noise, error rejection.
 - **OFX plugin compiles AND links** into a working `Expression.ofx` against the
   Academy Software Foundation OpenFX SDK (verified locally; CI reproduces it).
+- **OFX plugin HOST-VERIFIED in DaVinci Resolve Studio 20.3 (macOS arm64).**
+  Loaded, param panel populated, and **pixels confirmed correct end-to-end** by
+  rendering a known flat input through `r+g / b-r / r*g+b` and reading the EXR:
+  - at **32-bit float**: exact `0.6000000 / 0.4000000 / 0.6800000` (HDR-safe,
+    unclamped — the float path is a straight `(PIX)v`),
+  - at 8-bit it quantises as expected (`0.678 == 173/255`).
 - **Matchbox GLSL**: ASCII-clean, XML well-formed. Targets `#version 120` for
   Linux+macOS Flame.
 
+### Fixes made during host verification (see git log)
+
+These were required to actually run in Resolve and are now in the source:
+- **Added `Info.plist`** to the OFX bundle (was missing — bundle wouldn't load).
+- **Fixed the `Makefile`**: `PLUGINOBJECTS` must list only `Expression.o`; the
+  OFX Support objects come from `Makefile.master`'s `SUPPORTOBJECTS`.
+- **Guarded the OFX message suite.** Resolve's Fusion OFX host does **not**
+  implement it, so an unconditional `clearPersistentMessage()` threw
+  `kOfxStatErrUnsupported` on every render → black frame + "render failed". Now
+  wrapped in try/catch (also the error-path `setPersistentMessage` calls).
+- **`getRegionOfDefinition()` guarded** with a render-window fallback (defensive).
+- **16-bit float (half) support added** to the render dispatch (`eBitDepthHalf`),
+  since Fusion is half-native in some paths. Handles byte/short/half/float.
+
 ### NOT yet verified (next person / next session)
 
-- **Live behaviour inside a host.** Neither build has been loaded in Flame/Nuke
-  to confirm the param panel renders and pixels are correct end-to-end. Needs an
-  actual OFX host / Flame seat. This is the top priority before calling it done.
+- **Flame specifically.** Verified in Resolve (OFX); not yet loaded in Flame
+  itself (2021+ OFX, or the Matchbox build). Cross-platform builds still TODO:
+  **x86_64 Linux + Flame on both platforms** is the eventual target.
 - Matchbox `shader_builder -m ColorExpression.glsl` has not been run on a Flame
   box (no `shader_builder` available where this was authored).
+- **Test-harness caveat:** Fusion's *scripting* `SetInput()` does not push OFX
+  string-param values into the plugin instance (the plugin reads describe-time
+  defaults). This is a Fusion scripting-bridge quirk, **not** a plugin bug —
+  typed-in-UI params use the standard `getValueAtTime` path. Automated pixel
+  tests therefore drive the expressions via the param *defaults*.
 
 ## How to build
 
