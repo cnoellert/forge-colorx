@@ -114,13 +114,19 @@ These were required to actually run in Resolve and are now in the source:
 
 ### Open loose ends (small)
 
-- A throwaway Flame batch group **`FCX_OFX_TEST`** was left on the portofino
-  desktop (Colour Source → OpenFX → Write File). Safe to delete.
-- `/Library/OFX/Plugins/Expression.ofx.bundle` currently holds the **diagnostic**
-  build (test defaults `r+g…`, tries to log to `~/expr_debug.log`). Swap in the
-  clean build before real use: `make -C openfx/Support/Plugins/Expression
-  DEBUGFLAG=-O2` then `sudo cp -R …/Darwin-64-debug/Expression.ofx.bundle
-  /Library/OFX/Plugins/` and relaunch the host. (`rm ~/expr_debug.log` too.)
+- Throwaway test scaffolding to delete: Flame batch groups **`FCX_OFX_TEST`** and
+  **`FCX_METAL_TEST`** on the portofino desktop; Resolve project **`FCX_METAL_TEST`**
+  (timeline + Fusion comp); `/tmp/fcx_metal*.exr` and `/tmp/fcx_flame_*.exr`;
+  `/tmp/expr_path.log`.
+- `/Library/OFX/Plugins/Expression.ofx.bundle` currently holds the **path-marker
+  diagnostic** build (`-DEXPR_PATH_LOG`; appends to `/tmp/expr_path.log` every
+  frame — harmless but not for production). Swap in the **clean host-gated** build
+  (already built at `openfx/Support/Plugins/Expression/Darwin-64-debug/`):
+  `sudo sh -c 'rm -rf /Library/OFX/Plugins/Expression.ofx.bundle && cp -R
+  /Users/cnoellert/GitHub/forge-colorx/openfx/Support/Plugins/Expression/Darwin-64-debug/Expression.ofx.bundle
+  /Library/OFX/Plugins/'` then relaunch the host. (Rebuild it with `make -C
+  openfx/Support/Plugins/Expression DEBUGFLAG=-O2 CXXFLAGS_ADD=-DHAVE_METAL
+  LDFLAGS_ADD="-framework Metal -framework Foundation"`.)
 
 ## How to build
 
@@ -215,17 +221,20 @@ CPU evaluator is the **numeric oracle** for every target.
        render AND our `renderMetal()` executed (not the fallback). The off-host GPU
        correctness (test_metal_render, ~1e-7) and the in-host Metal dispatch are
        now joined: **the Metal path runs end-to-end in Resolve.**
-     - ⚠️ **Flame HARD-CRASHES on the Metal build — fixed by host-gating.** With
-       Metal advertised, Autodesk Flame 2026.2.2's macOS OFX host crashed hard when
-       the node was used (the CPU-only build was fine there last session; the marker
-       logged no Flame entry → crash was *inside* our Metal dispatch, i.e. Flame
-       enabled Metal and handed us buffers/queue our code couldn't safely consume).
-       **Fix:** OFX-Metal is now **host-gated** — `hostDrivesMetalSafely()` only
-       advertises `setSupportsMetalRender` and takes the GPU branch when the OFX
-       host name contains "Resolve". Flame (and any unverified host) stays on the
-       known-good CPU path. Expand the allow-list only after verifying a host
-       end-to-end. (Re-verify after this change: Resolve still `branch=metal`;
-       Flame loads + renders on CPU without crashing.)
+     - ✅ **Flame: was hard-crashing on the Metal build — fixed by host-gating,
+       re-verified.** With Metal advertised, Autodesk Flame 2026.2.2's macOS OFX
+       host crashed hard when the node was used (the CPU-only build was fine last
+       session; the marker logged no Flame entry → crash was *inside* our Metal
+       dispatch). **Fix:** OFX-Metal is now **host-gated** — `hostDrivesMetalSafely()`
+       only advertises `setSupportsMetalRender` + takes the GPU branch when the OFX
+       host name contains "Resolve". **Re-verified end-to-end on both hosts with the
+       host-gated build:**
+       - Resolve (`host=DaVinciResolve`): `metalEnabled=1 branch=metal`, pixels exact.
+       - Flame (`host=com.autodesk.flame`): `metalEnabled=0 branch=cpu`, **no crash**,
+         creating+binding the OpenFX node (the prior crash point) works, and a 100-
+         frame Write File render produced correct passthrough (0.30005/0.60010/0.89990
+         — the ~1.6e-4 is Flame's Colour-Source input representation, not our plugin).
+       Expand the Metal allow-list only after verifying a host end-to-end.
      - Also still open: drop `waitUntilCompleted` for async dispatch per the OFX
        spec once the path is confirmed.
      - Throwaway state left behind: Resolve project **`FCX_METAL_TEST`** (timeline
@@ -289,13 +298,13 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Session history (newest first)
 
-- GPU Phase 2 (render wiring): per-pixel Metal kernel builder + `ExprMetal.mm`
-  dispatch bridge wired into `render()` (CPU fallback), `setSupportsMetalRender`,
-  Darwin-only Makefile. Pixel path GPU-verified vs the CPU binding
-  (`test_metal_render.mm`, ~1e-7); bundle builds+links. **Host-verified in Resolve
-  Studio 20.3.1.6:** the Metal-linked node loads/instantiates and renders exact
-  passthrough — but whether Resolve drives our Metal kernel vs the CPU fallback
-  is not yet attributed (needs a path-marker build).
+- GPU Phase 2 (render wiring + dual-host verify): per-pixel Metal kernel builder +
+  `ExprMetal.mm` dispatch wired into `render()` (CPU fallback), Darwin-only Makefile.
+  Pixel path GPU-verified vs CPU binding (`test_metal_render.mm`, ~1e-7).
+  **Resolve: confirmed driving our Metal kernel** (`metalEnabled=1 branch=metal`,
+  pixels exact, via the `-DEXPR_PATH_LOG` marker). **Flame hard-crashed** on the
+  Metal node → **host-gated** OFX-Metal (`hostDrivesMetalSafely`, Resolve-only);
+  Flame re-verified on the CPU path, no crash, correct passthrough.
 - GPU Phase 2 (noise parity): float-internal value-noise so CPU == GPU
   (bit-identical value-noise; `random()` still caveated). 
 - GPU Phase 2 (foundation): Metal MSL prelude (`ExprKernelMetal.h`) + real-GPU
