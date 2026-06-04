@@ -37,6 +37,22 @@
 #include "ExprKernelMetal.h"
 #include "ExprMetal.h"
 #include <utility>
+
+// OFX-Metal support is HOST-SPECIFIC. We only advertise it and take the GPU path
+// on hosts we have actually verified drive the OFX Metal render correctly. Other
+// hosts get the CPU path. Concretely: DaVinci Resolve's OFX host enables Metal and
+// hands us valid MTLBuffers + a command queue (verified: pixels exact, path=metal),
+// but Autodesk Flame's macOS OFX host hard-crashes when given our Metal node — so
+// Flame (and any not-yet-verified host) must stay on the CPU path. Gated by the OFX
+// host name; expand the allow-list only after verifying a host end-to-end.
+static bool hostDrivesMetalSafely()
+{
+    try {
+        OFX::ImageEffectHostDescription* h = OFX::getImageEffectHostDescription();
+        if (h && h->hostName.find("Resolve") != std::string::npos) return true; // "DaVinciResolve"
+    } catch (...) {}
+    return false;
+}
 #endif
 
 // Opt-in render-path diagnostic (off in normal + CI builds). Build with
@@ -401,8 +417,10 @@ void ExpressionPlugin::render(const OFX::RenderArguments& args)
     buildContext(args, ctx);
 
 #ifdef HAVE_METAL
-    // Prefer the GPU when the host is driving a Metal render; fall back to CPU.
-    if (args.isEnabledMetalRender && args.pMetalCmdQ) {
+    // Prefer the GPU only on a verified host (hostDrivesMetalSafely) that is
+    // actually driving a Metal render; otherwise CPU. The host gate is what keeps
+    // Flame (which crashes in the Metal dispatch) safely on the CPU path.
+    if (hostDrivesMetalSafely() && args.isEnabledMetalRender && args.pMetalCmdQ) {
         bool gpu = renderMetal(args, ctx);
         EXPR_PATHLOG(1, gpu ? "metal" : "metal-failed->cpu");
         if (gpu) return;
@@ -484,9 +502,11 @@ void ExpressionPluginFactory::describe(OFX::ImageEffectDescriptor& desc)
     desc.setRenderThreadSafety(OFX::eRenderFullySafe);
 
 #ifdef HAVE_METAL
-    // Advertise the Metal render path; the host then MAY hand us float MTLBuffers
-    // + a command queue at render (we fall back to CPU whenever it doesn't).
-    try { desc.setSupportsMetalRender(true); } catch (...) {}
+    // Advertise the Metal render path ONLY to hosts we've verified handle it (see
+    // hostDrivesMetalSafely) — Flame's macOS OFX host crashes on our Metal node, so
+    // we must not advertise Metal to it. Verified hosts then MAY hand us float
+    // MTLBuffers + a command queue at render (we fall back to CPU if they don't).
+    if (hostDrivesMetalSafely()) { try { desc.setSupportsMetalRender(true); } catch (...) {} }
 #endif
 }
 

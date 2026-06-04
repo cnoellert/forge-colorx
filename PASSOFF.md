@@ -208,17 +208,24 @@ CPU evaluator is the **numeric oracle** for every target.
      passthrough 0.300000 / 0.600000 / 0.900000** (identity defaults), clean log,
      no `kOfxStatFailed`. Driven from the scripting harness in
      [[resolve-ofx-verification]].
-     - ⏭ **Open: which path ran.** Pixels are identical whether Resolve drove our
-       Metal kernel or the CPU fallback, so this render does **not** prove the GPU
-       path executed. Resolve's Fusion OFX host is CPU-leaning and may not set
-       `kOfxImageEffectPropMetalEnabled` for this node at all. To attribute the
-       path, build with a one-line marker in `renderMetal()`/the CPU branch
-       (gated behind a build flag, e.g. `-DEXPR_PATH_LOG`) that records whether
-       `args.isEnabledMetalRender` was set and which branch executed, reinstall,
-       relaunch, re-render, read the marker. Until then: GPU path is proven
-       correct **off-host** (test_metal_render, ~1e-7) and the plugin is proven
-       correct **in-host**; the join — Resolve actually dispatching our Metal
-       kernel — is unconfirmed.
+     - ✅ **Resolve DOES drive our Metal kernel — confirmed.** A path-marker build
+       (`-DEXPR_PATH_LOG`, logs host + `MetalEnabled` + branch to
+       `/tmp/expr_path.log`) recorded `host=DaVinciResolve metalEnabled=1
+       branch=metal` with pixels exact `0.3/0.6/0.9`. So Resolve enables Metal
+       render AND our `renderMetal()` executed (not the fallback). The off-host GPU
+       correctness (test_metal_render, ~1e-7) and the in-host Metal dispatch are
+       now joined: **the Metal path runs end-to-end in Resolve.**
+     - ⚠️ **Flame HARD-CRASHES on the Metal build — fixed by host-gating.** With
+       Metal advertised, Autodesk Flame 2026.2.2's macOS OFX host crashed hard when
+       the node was used (the CPU-only build was fine there last session; the marker
+       logged no Flame entry → crash was *inside* our Metal dispatch, i.e. Flame
+       enabled Metal and handed us buffers/queue our code couldn't safely consume).
+       **Fix:** OFX-Metal is now **host-gated** — `hostDrivesMetalSafely()` only
+       advertises `setSupportsMetalRender` and takes the GPU branch when the OFX
+       host name contains "Resolve". Flame (and any unverified host) stays on the
+       known-good CPU path. Expand the allow-list only after verifying a host
+       end-to-end. (Re-verify after this change: Resolve still `branch=metal`;
+       Flame loads + renders on CPU without crashing.)
      - Also still open: drop `waitUntilCompleted` for async dispatch per the OFX
        spec once the path is confirmed.
      - Throwaway state left behind: Resolve project **`FCX_METAL_TEST`** (timeline
