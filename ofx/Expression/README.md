@@ -55,9 +55,20 @@ from there; the node appears under **Color/Math > Expression**.
 
 ## Using it
 
-Four multiline fields — `r =` `g =` `b =` `a =` — each take an expression.
-Four `temp name / temp expr` rows let you define reusable variables (evaluated
-top to bottom, before the channel fields), exactly like Nuke's temporaries.
+The UI is split into four pages:
+
+- **Channels** — the four output expressions `r =` `g =` `b =` `a =`.
+- **Variables** — four `var N name` / `var N =` rows: name a value **derived by a
+  formula** (luminance, a vignette falloff, …) and reuse it in the channels.
+  Evaluated top to bottom before the channels — exactly like Nuke's temporaries.
+- **Constants** — four animatable knobs `k1..k4`, each with an optional **`kN name`**
+  alias, plus the **Reference Colour**. The slider drives the value; the name is a
+  friendly token for it. Name `k1` "gamma" and both `gamma` and `k1` resolve to that
+  slider in any expression.
+- **Output** — **Mix** (blend original↔result) and **Clamp Output**.
+
+So there are two kinds of named token: a **Variable** is *computed* (name + formula),
+a **Constant** is *dialed* (name + slider). Both are usable anywhere in the channels.
 
 ### Predefined variables
 
@@ -69,15 +80,16 @@ top to bottom, before the channel fields), exactly like Nuke's temporaries.
 | `width height`   | Image size (region of definition)                         |
 | `frame` / `t`    | Current frame (render time); `t` is a Nuke-parity alias    |
 | `pi e`           | Constants (also callable as `pi()` `e()`)                 |
-| `k1 k2 k3 k4`    | Animatable scalar knobs (`k1` defaults to 1, rest 0)      |
+| `k1 k2 k3 k4`    | Constant knobs (Constants page; `k1` defaults to 1, rest 0) |
+| *your `kN` aliases* | Whatever you name a constant knob (e.g. `gamma`)         |
 | `ref.r ref.g ref.b` | The Reference Colour knob (RGB), default `0`            |
-| *your temps*     | Whatever you name in the temp rows                        |
+| *your variables* | Whatever you name in the Variables rows                    |
 
-The `k1..k4` and `ref` knobs (and the **Mix** / **Clamp Output** controls below)
-mirror the companion Matchbox build, so the OFX is now a superset: type any
-expression *and* drive it live with keyframable constants. **Mix** blends the
-original image (0) with the expression result (1); **Clamp Output** clamps the
-result to `0..1` (applied before Mix, matching the Matchbox).
+The `k1..k4`/aliases, `ref`, **Mix** and **Clamp Output** mirror the companion
+Matchbox build, so the OFX is a superset: type any expression *and* drive it live
+with keyframable, nameable constants. **Mix** blends the original image (0) with the
+expression result (1); **Clamp Output** clamps the result to `0..1` (applied before
+Mix, matching the Matchbox).
 
 For byte/short clips the channels are normalised to 0..1 on the way in and
 written back at the clip's bit depth (clamped). Float clips pass through

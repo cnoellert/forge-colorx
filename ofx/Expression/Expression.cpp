@@ -179,8 +179,13 @@ enum { V_R = 0, V_G, V_B, V_A, V_X, V_Y, V_CX, V_CY, V_WIDTH, V_HEIGHT, V_FRAME,
 struct ExprContext {
     std::vector<std::string> names;       // variable names, by slot index
     expreval::Program        chan[4];     // r,g,b,a output expressions
-    expreval::Program        temps[kNumTemps];
-    int                      tempSlot[kNumTemps]; // -1 if that row is unused
+    // Derived bindings, evaluated in order before the channel exprs. This carries
+    // BOTH kinds of named token: the named-constant aliases (a name for a k-knob,
+    // value driven by the k slider) and the name+formula temps (a value derived
+    // from the image). Both end up here as (slot, program) pairs, so the per-pixel
+    // loop and the GPU kernel treat them uniformly.
+    std::vector<int>              derivedSlot;
+    std::vector<expreval::Program> derived;
     int                      nVars = 0;
     double                   width = 0, height = 0, frame = 0;
     // user-constant knobs (mirror the Matchbox: k1..k4, ref colour, mix, clamp)
@@ -246,10 +251,9 @@ public:
                 vars[V_CX] = ((double)x - halfW) * invHalfW;
                 vars[V_CY] = ((double)y - halfH) * invHalfW;   // divide by halfW -> aspect preserved
 
-                // ---- temp variables, evaluated in order ----
-                for (int t = 0; t < kNumTemps; ++t)
-                    if (_ctx->tempSlot[t] >= 0)
-                        vars[_ctx->tempSlot[t]] = _ctx->temps[t].eval(&vars[0]);
+                // ---- derived bindings (named constants + temps), in order ----
+                for (size_t d = 0; d < _ctx->derived.size(); ++d)
+                    vars[_ctx->derivedSlot[d]] = _ctx->derived[d].eval(&vars[0]);
 
                 // ---- channel expressions ----
                 double out[4];
@@ -317,6 +321,10 @@ public:
         }
         _k1 = fetchDoubleParam("k1"); _k2 = fetchDoubleParam("k2");
         _k3 = fetchDoubleParam("k3"); _k4 = fetchDoubleParam("k4");
+        for (int i = 0; i < 4; ++i) {
+            char n[16]; std::sprintf(n, "kName%d", i + 1);
+            _kName[i] = fetchStringParam(n);
+        }
         _ref = fetchRGBParam("ref");
         _mix = fetchDoubleParam("mix");
         _clamp = fetchBooleanParam("clampOutput");
@@ -349,6 +357,7 @@ private:
     OFX::StringParam* _tempExpr[kNumTemps];
     OFX::DoubleParam* _k1; OFX::DoubleParam* _k2;
     OFX::DoubleParam* _k3; OFX::DoubleParam* _k4;
+    OFX::StringParam* _kName[4];          // optional alias names for k1..k4
     OFX::RGBParam*    _ref;
     OFX::DoubleParam* _mix;
     OFX::BooleanParam* _clamp;
@@ -362,27 +371,51 @@ void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContex
           "k1","k2","k3","k4","ref.r","ref.g","ref.b" };
     ctx.names.assign(fixed, fixed + V_FIXED_COUNT);
 
-    // append the named temp variables
-    std::string tname[kNumTemps], texpr[kNumTemps];
-    for (int t = 0; t < kNumTemps; ++t) {
-        _tempName[t]->getValueAtTime(args.time, tname[t]);
-        _tempExpr[t]->getValueAtTime(args.time, texpr[t]);
-        ctx.tempSlot[t] = -1;
-        if (!tname[t].empty()) {
-            ctx.tempSlot[t] = (int)ctx.names.size();
-            ctx.names.push_back(tname[t]);
-        }
-    }
-    ctx.nVars = (int)ctx.names.size();
-
+    // Build the derived bindings, evaluated in order before the channels. (names_
+    // stores the address of the ctx.names vector object, which is stable across the
+    // push_backs below, so compiling against the growing list is safe.)
+    ctx.derived.clear();
+    ctx.derivedSlot.clear();
     std::string err;
-    for (int t = 0; t < kNumTemps; ++t) {
-        if (ctx.tempSlot[t] >= 0 && !ctx.temps[t].compile(texpr[t], ctx.names, err)) {
+
+    // (1) Named constants: an optional alias for each k-knob. If you name k1
+    // "gamma", then `gamma` becomes a token whose value is driven by the k1 slider
+    // (its program is simply "k1"). k1..k4 always work too.
+    for (int i = 0; i < 4; ++i) {
+        std::string knm; _kName[i]->getValueAtTime(args.time, knm);
+        if (knm.empty()) continue;
+        int slot = (int)ctx.names.size();
+        ctx.names.push_back(knm);
+        char src[8]; std::sprintf(src, "k%d", i + 1);
+        expreval::Program p;
+        if (!p.compile(src, ctx.names, err)) {   // can't realistically fail
             try { setPersistentMessage(OFX::Message::eMessageError, "",
-                "Temp '" + tname[t] + "': " + err); } catch (...) {}
+                "Constant '" + knm + "': " + err); } catch (...) {}
             OFX::throwSuiteStatusException(kOfxStatFailed);
         }
+        ctx.derivedSlot.push_back(slot);
+        ctx.derived.push_back(p);
     }
+
+    // (2) Named variables: name + formula (a value derived from the image / other
+    // vars), evaluated in order so a later variable can use an earlier one.
+    for (int t = 0; t < kNumTemps; ++t) {
+        std::string tname, texpr;
+        _tempName[t]->getValueAtTime(args.time, tname);
+        _tempExpr[t]->getValueAtTime(args.time, texpr);
+        if (tname.empty()) continue;
+        int slot = (int)ctx.names.size();
+        ctx.names.push_back(tname);
+        expreval::Program p;
+        if (!p.compile(texpr, ctx.names, err)) {
+            try { setPersistentMessage(OFX::Message::eMessageError, "",
+                "Variable '" + tname + "': " + err); } catch (...) {}
+            OFX::throwSuiteStatusException(kOfxStatFailed);
+        }
+        ctx.derivedSlot.push_back(slot);
+        ctx.derived.push_back(p);
+    }
+    ctx.nVars = (int)ctx.names.size();
 
     std::string es[4];
     _exprR->getValueAtTime(args.time, es[0]);
@@ -455,9 +488,8 @@ bool ExpressionPlugin::renderMetal(const OFX::RenderArguments& args, const ExprC
     std::string chan[4] = { ctx.chan[0].emitC(), ctx.chan[1].emitC(),
                             ctx.chan[2].emitC(), ctx.chan[3].emitC() };
     std::vector<std::pair<int, std::string> > temps;
-    for (int t = 0; t < kNumTemps; ++t)
-        if (ctx.tempSlot[t] >= 0)
-            temps.push_back(std::make_pair(ctx.tempSlot[t], ctx.temps[t].emitC()));
+    for (size_t d = 0; d < ctx.derived.size(); ++d)
+        temps.push_back(std::make_pair(ctx.derivedSlot[d], ctx.derived[d].emitC()));
     std::string msl = expreval::buildMetalPixelKernel(chan, temps, ctx.nVars);
 
     std::unique_ptr<OFX::Image> dst(_dstClip->fetchImage(args.time));
@@ -515,9 +547,8 @@ bool ExpressionPlugin::renderCuda(const OFX::RenderArguments& args, const ExprCo
     std::string chan[4] = { ctx.chan[0].emitC(), ctx.chan[1].emitC(),
                             ctx.chan[2].emitC(), ctx.chan[3].emitC() };
     std::vector<std::pair<int, std::string> > temps;
-    for (int t = 0; t < kNumTemps; ++t)
-        if (ctx.tempSlot[t] >= 0)
-            temps.push_back(std::make_pair(ctx.tempSlot[t], ctx.temps[t].emitC()));
+    for (size_t d = 0; d < ctx.derived.size(); ++d)
+        temps.push_back(std::make_pair(ctx.derivedSlot[d], ctx.derived[d].emitC()));
     std::string cu = expreval::buildCudaPixelKernel(chan, temps, ctx.nVars);
 
     std::unique_ptr<OFX::Image> dst(_dstClip->fetchImage(args.time));
@@ -695,52 +726,74 @@ void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc
     dst->addSupportedComponent(OFX::ePixelComponentAlpha);
     dst->setSupportsTiles(true);
 
-    OFX::PageParamDescriptor* page = desc.definePageParam("Controls");
+    // Four separate pages so the panel reads clearly. Hosts that honour OFX pages
+    // show them as tabs; Flame labels each auto-laid-out column group by its page
+    // name (so the previously-ambiguous boxes now sit under Channels / Variables /
+    // Constants / Output).
+    OFX::PageParamDescriptor* pgChan  = desc.definePageParam("Channels");
+    OFX::PageParamDescriptor* pgVars  = desc.definePageParam("Variables");
+    OFX::PageParamDescriptor* pgConst = desc.definePageParam("Constants");
+    OFX::PageParamDescriptor* pgOut   = desc.definePageParam("Output");
 
-    defineExprParam(desc, page, "exprR", "r =", "r");
-    defineExprParam(desc, page, "exprG", "g =", "g");
-    defineExprParam(desc, page, "exprB", "b =", "b");
-    defineExprParam(desc, page, "exprA", "a =", "a");
+    // --- Channels: the four output expressions ---
+    defineExprParam(desc, pgChan, "exprR", "r =", "r");
+    defineExprParam(desc, pgChan, "exprG", "g =", "g");
+    defineExprParam(desc, pgChan, "exprB", "b =", "b");
+    defineExprParam(desc, pgChan, "exprA", "a =", "a");
 
+    // --- Variables: name + formula. A value DERIVED from the image (or earlier
+    //     variables/constants). Name it, then use that name in the channels. ---
     for (int t = 0; t < kNumTemps; ++t) {
-        char n[16], e[16], ln[24], le[24];
+        char n[16], e[16], ln[24], le[28];
         std::sprintf(n, "tempName%d", t);
         std::sprintf(e, "tempExpr%d", t);
-        std::sprintf(ln, "temp name %d", t);
-        std::sprintf(le, "temp expr %d", t);
+        std::sprintf(ln, "var %d name", t + 1);
+        std::sprintf(le, "var %d  =", t + 1);
         OFX::StringParamDescriptor* pn = desc.defineStringParam(n);
         pn->setLabel(ln);
         pn->setStringType(OFX::eStringTypeSingleLine);
         pn->setDefault("");
+        pn->setHint("Name a derived variable (blank = row off); use the name in your channel expressions.");
         pn->setAnimates(false);
-        page->addChild(*pn);
-        defineExprParam(desc, page, e, le, "");
+        pgVars->addChild(*pn);
+        defineExprParam(desc, pgVars, e, le, "");
     }
 
-    // ---- user-constant knobs (mirror the Matchbox: k1..k4, ref, mix, clamp) ----
-    // Animatable scalars you can reference inside any expression as k1..k4; k1
-    // defaults to 1 (a handy "amount"), the rest to 0.
+    // --- Constants: animatable k-knobs, each with an optional alias name. The
+    //     slider drives the value; the name is a friendly token for it. Name k1
+    //     "gamma" and `gamma` resolves to the k1 slider (k1..k4 always work). ---
     for (int i = 0; i < 4; ++i) {
-        char n[8], l[8];
-        std::sprintf(n, "k%d", i + 1);
-        std::sprintf(l, "k%d", i + 1);
-        OFX::DoubleParamDescriptor* p = desc.defineDoubleParam(n);
-        p->setLabel(l);
+        char nm[16], lnm[16], kn[8], lk[8];
+        std::sprintf(nm, "kName%d", i + 1);
+        std::sprintf(lnm, "k%d name", i + 1);
+        std::sprintf(kn, "k%d", i + 1);
+        std::sprintf(lk, "k%d", i + 1);
+        OFX::StringParamDescriptor* pn = desc.defineStringParam(nm);
+        pn->setLabel(lnm);
+        pn->setStringType(OFX::eStringTypeSingleLine);
+        pn->setDefault("");
+        pn->setHint("Optional alias for this knob, e.g. name it 'gamma' and use gamma in expressions.");
+        pn->setAnimates(false);
+        pgConst->addChild(*pn);
+
+        OFX::DoubleParamDescriptor* p = desc.defineDoubleParam(kn);
+        p->setLabel(lk);
         p->setDefault(i == 0 ? 1.0 : 0.0);
         p->setRange(-1e6, 1e6);
         p->setDisplayRange(-1.0, 1.0);
         p->setIncrement(0.001);
-        p->setHint("Generic animatable scalar; reference it as k1..k4 in your expressions.");
+        p->setHint("Animatable scalar; reference as this knob's name or kN in your expressions.");
         p->setAnimates(true);
-        page->addChild(*p);
+        pgConst->addChild(*p);
     }
     OFX::RGBParamDescriptor* ref = desc.defineRGBParam("ref");
     ref->setLabel("Reference Colour");
     ref->setDefault(0.0, 0.0, 0.0);
     ref->setHint("Reference colour; reference it as ref.r ref.g ref.b in your expressions.");
     ref->setAnimates(true);
-    page->addChild(*ref);
+    pgConst->addChild(*ref);
 
+    // --- Output: post-process the result (clamp first, then mix vs the original) ---
     OFX::DoubleParamDescriptor* mix = desc.defineDoubleParam("mix");
     mix->setLabel("Mix");
     mix->setDefault(1.0);
@@ -749,14 +802,14 @@ void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc
     mix->setIncrement(0.001);
     mix->setHint("Blend between the original image (0) and the expression result (1).");
     mix->setAnimates(true);
-    page->addChild(*mix);
+    pgOut->addChild(*mix);
 
     OFX::BooleanParamDescriptor* clampOut = desc.defineBooleanParam("clampOutput");
     clampOut->setLabel("Clamp Output");
     clampOut->setDefault(false);
     clampOut->setHint("Clamp the result to the 0..1 range (like Nuke's clamp(x)).");
     clampOut->setAnimates(true);
-    page->addChild(*clampOut);
+    pgOut->addChild(*clampOut);
 }
 
 OFX::ImageEffect* ExpressionPluginFactory::createInstance(OfxImageEffectHandle handle, OFX::ContextEnum /*context*/)

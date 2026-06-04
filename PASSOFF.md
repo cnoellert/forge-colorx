@@ -400,6 +400,14 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Session history (newest first)
 
+- OFX params reorg: split the UI into four labelled pages (Channels / Variables /
+  Constants / Output) and made the k-knobs **nameable** — an optional `kN name`
+  alias per knob (name `k1` "gamma" → `gamma` resolves to the k1 slider). Kept BOTH
+  kinds of named token: Variables = name+formula (derived), Constants = name+slider
+  (dialed). Refactored the temp machinery into a general `derived` (slot, Program)
+  list shared by CPU + GPU. Also added `t` as a Nuke-parity alias for `frame`.
+  (Decision: Flame's bridge exposes no OFX params to Python — k1 reads None, hasattr
+  lies — so param/animation-editor checks are UI-only; see [[flame-ofx-bridge]].)
 - OFX user-constant knobs: added `k1..k4` (animatable scalars), `ref` colour
   (`ref.r/.g/.b`), `Mix`, `Clamp Output` to the OFX, bound as expression variables
   (slots 11..17, before temps) + output post-ops, mirroring the Matchbox so the OFX
