@@ -55,17 +55,15 @@ from there; the node appears under **Color/Math > Expression**.
 
 ## Using it
 
-Everything is one **Expression** script box — **one `name = expression` per line**,
-evaluated top to bottom:
+Everything is one **Expression** script box — statements separated by **`;`** (or a
+newline), evaluated left to right / top to bottom:
 
 ```
-gamma = k1                                # a variable aliasing the k1 knob
-lum   = 0.2126*r + 0.7152*g + 0.0722*b    # a variable derived from the image
-r = pow(r, 1/gamma)                       # set the r output
-g = lum
-b = lum
-a = a
+gamma = k1; lum = 0.2126*r+0.7152*g+0.0722*b; r = pow(r,1/gamma); g = lum; b = lum
 ```
+
+(Newlines work too on hosts that keep them — Resolve/Nuke. **Flame collapses
+newlines**, so use `;` there; the default `r = r; g = g; b = b; a = a` shows the form.)
 
 - A line named **`r` `g` `b` `a`** sets that **output channel**. The four channels
   evaluate *independently* of each other (so `r = g` / `g = r` swaps cleanly).

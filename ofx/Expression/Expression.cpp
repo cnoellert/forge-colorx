@@ -403,29 +403,34 @@ void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContex
         try { setPersistentMessage(OFX::Message::eMessageError, "", msg); } catch (...) {}
         OFX::throwSuiteStatusException(kOfxStatFailed);
     };
-    size_t pos = 0; int lineNo = 0;
+    // Statements are separated by ';' OR newline. (Flame's OFX string field collapses
+    // newlines into one line, so ';' is the portable separator there; Resolve/Nuke
+    // keep real newlines. Either works.)
+    size_t pos = 0; int stmtNo = 0;
     while (pos < script.size()) {
-        size_t eol = script.find('\n', pos);
-        std::string line = script.substr(pos, (eol == std::string::npos) ? std::string::npos : eol - pos);
-        pos = (eol == std::string::npos) ? script.size() : eol + 1;
-        ++lineNo;
+        size_t nl = script.find('\n', pos);
+        size_t sc = script.find(';', pos);
+        size_t end = (nl < sc) ? nl : sc;     // npos is max, so this picks the nearer
+        std::string line = script.substr(pos, (end == std::string::npos) ? std::string::npos : end - pos);
+        pos = (end == std::string::npos) ? script.size() : end + 1;
+        ++stmtNo;
         line = trimws(line);
         if (line.empty() || line[0] == '#') continue;
 
-        char ln[16]; std::sprintf(ln, "%d", lineNo);
+        char ln[16]; std::sprintf(ln, "%d", stmtNo);
         size_t eq = line.find('=');   // the assignment '='; any ==,<=,!= sit on the RHS
         if (eq == std::string::npos)
-            fail(std::string("line ") + ln + ": expected 'name = expression'");
+            fail(std::string("statement ") + ln + ": expected 'name = expression'");
         std::string name = trimws(line.substr(0, eq));
         std::string expr = trimws(line.substr(eq + 1));
         if (!validIdent(name))
-            fail(std::string("line ") + ln + ": '" + name + "' is not a valid name");
+            fail(std::string("statement ") + ln + ": '" + name + "' is not a valid name");
 
         // r/g/b/a -> output channel; otherwise a variable (must not shadow a built-in)
         int ch = (name == "r") ? 0 : (name == "g") ? 1 : (name == "b") ? 2 : (name == "a") ? 3 : -1;
         if (ch >= 0) { chanStr[ch] = expr; continue; }
         if (isBuiltinName(name))
-            fail(std::string("line ") + ln + ": '" + name + "' is a built-in name; choose another");
+            fail(std::string("statement ") + ln + ": '" + name + "' is a built-in name; choose another");
 
         int slot = (int)ctx.names.size();
         ctx.names.push_back(name);
@@ -741,9 +746,11 @@ void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc
         OFX::StringParamDescriptor* s = desc.defineStringParam("script");
         s->setLabel("expression");
         s->setStringType(OFX::eStringTypeMultiLine);
-        s->setDefault("r = r\ng = g\nb = b\na = a");
-        s->setHint("One 'name = expression' per line. r/g/b/a set the output channels; "
-                   "any other name is a variable usable below (e.g. lum = 0.2126*r+0.7152*g+0.0722*b, "
+        // Default is a valid identity passthrough on ONE line (Flame collapses
+        // newlines, so the portable separator is ';').
+        s->setDefault("r = r; g = g; b = b; a = a");
+        s->setHint("Statements separated by ';' (or newline). r/g/b/a set the output channels; "
+                   "any other name is a variable usable later (e.g. lum = 0.2126*r+0.7152*g+0.0722*b; "
                    "or gamma = k1). Knobs are k1..k4; # starts a comment.");
         s->setAnimates(false);
         pgExpr->addChild(*s);
