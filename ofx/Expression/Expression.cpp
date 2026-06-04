@@ -159,7 +159,7 @@ static inline unsigned short floatToHalf(float f)
 #define kPluginName        "Expression"
 #define kPluginGrouping    "Color/Math"
 #define kPluginDescription "Per-channel math expressions, a re-creation of Nuke's Expression node.\n" \
-                           "Variables: r g b a, x y, cx cy, width height, frame, pi, the k1..k4 and\n" \
+                           "Variables: r g b a, x y, cx cy, width height, frame (alias t), pi, k1..k4 and\n" \
                            "ref.r/ref.g/ref.b knobs, plus your temps. Mix blends original<->result; Clamp "\
                            "clamps to 0..1."
 #define kPluginIdentifier  "tv.diff.Expression"

@@ -67,7 +67,7 @@ top to bottom, before the channel fields), exactly like Nuke's temporaries.
 | `x y`            | Pixel coordinates, origin bottom-left (as in Nuke)        |
 | `cx cy`          | Centred, aspect-preserved coords: `(0,0)` centre, `±1` L/R |
 | `width height`   | Image size (region of definition)                         |
-| `frame`          | Current frame (render time)                               |
+| `frame` / `t`    | Current frame (render time); `t` is a Nuke-parity alias    |
 | `pi e`           | Constants (also callable as `pi()` `e()`)                 |
 | `k1 k2 k3 k4`    | Animatable scalar knobs (`k1` defaults to 1, rest 0)      |
 | `ref.r ref.g ref.b` | The Reference Colour knob (RGB), default `0`            |

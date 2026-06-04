@@ -330,6 +330,11 @@ inline int Program::parsePrimary() {
         if (name == "pi") { Node n; n.kind = N_NUM; n.num = 3.141592653589793; return newNode(n); }
         if (name == "e")  { Node n; n.kind = N_NUM; n.num = 2.718281828459045; return newNode(n); }
         int vi = varIndex(name);
+        // Nuke parity: 't' is an alias for 'frame' (in Nuke's expression language
+        // frame/t/x all evaluate to the frame number; the Expression node reuses
+        // x for the pixel coord, so only t aliases frame here). A user temp named
+        // 't' still wins (varIndex is checked first).
+        if (vi < 0 && name == "t") vi = varIndex("frame");
         if (vi < 0) return fail("unknown variable '" + name + "'"), -1;
         Node n; n.kind = N_VAR; n.var = vi;
         return newNode(n);

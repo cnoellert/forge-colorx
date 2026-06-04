@@ -190,11 +190,12 @@ void main(void)
     float cx = (x - width  * 0.5) / (width * 0.5);   // centred, aspect-preserved
     float cy = (y - height * 0.5) / (width * 0.5);   // (matches Nuke cx/cy)
     float frame = adsk_time;
+    float t = frame;                   // Nuke parity: t is an alias for frame
 
     // =========================================================================
     //  EXPRESSION BLOCK  --  EDIT THESE FOUR LINES
     //  Write each channel exactly as you would in Nuke's Expression node.
-    //  Available: r g b a  x y cx cy  width height frame  k1 k2 k3 k4  ref
+    //  Available: r g b a  x y cx cy  width height frame (alias t)  k1 k2 k3 k4  ref
     //  plus the full function library above (sin, pow, clamp, lerp, noise, ...).
     //
     //  Examples (uncomment / replace the identity below):
