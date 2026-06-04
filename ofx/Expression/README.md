@@ -55,27 +55,20 @@ from there; the node appears under **Color/Math > Expression**.
 
 ## Using it
 
-Everything is one **Expression** script box — statements separated by **`;`** (or a
-newline), evaluated left to right / top to bottom:
+The UI is split into four pages:
 
-```
-gamma = k1; lum = 0.2126*r+0.7152*g+0.0722*b; r = pow(r,1/gamma); g = lum; b = lum
-```
+- **Channels** — the four output expressions `r =` `g =` `b =` `a =`.
+- **Variables** — four `var N name` / `var N =` rows: name a value **derived by a
+  formula** (luminance, a vignette falloff, …) and reuse it in the channels.
+  Evaluated top to bottom before the channels — exactly like Nuke's temporaries.
+- **Constants** — four animatable knobs `k1..k4`, each with an optional **`kN name`**
+  alias, plus the **Reference Colour**. The slider drives the value; the name is a
+  friendly token for it. Name `k1` "gamma" and both `gamma` and `k1` resolve to that
+  slider in any expression.
+- **Output** — **Mix** (blend original↔result) and **Clamp Output**.
 
-(Newlines work too on hosts that keep them — Resolve/Nuke. **Flame collapses
-newlines**, so use `;` there; the default `r = r; g = g; b = b; a = a` shows the form.)
-
-- A line named **`r` `g` `b` `a`** sets that **output channel**. The four channels
-  evaluate *independently* of each other (so `r = g` / `g = r` swaps cleanly).
-  Any channel you don't assign passes through.
-- **Any other name** declares a **variable** usable on later lines — a derived value
-  (`lum = …`) or a friendly alias for a knob (`gamma = k1`). Variables evaluate in
-  order, so declare one before you use it.
-- Reference the knobs as `k1..k4`; blank lines and `#` comments are ignored.
-
-One self-labelling box means the panel stays readable even on hosts — like Flame —
-that don't render labels for text fields. The `k1..k4` sliders, **Reference Colour**,
-**Mix** and **Clamp Output** are separate (numeric) knobs.
+So there are two kinds of named token: a **Variable** is *computed* (name + formula),
+a **Constant** is *dialed* (name + slider). Both are usable anywhere in the channels.
 
 ### Predefined variables
 
@@ -88,8 +81,9 @@ that don't render labels for text fields. The `k1..k4` sliders, **Reference Colo
 | `frame` / `t`    | Current frame (render time); `t` is a Nuke-parity alias    |
 | `pi e`           | Constants (also callable as `pi()` `e()`)                 |
 | `k1 k2 k3 k4`    | Constant knobs (Constants page; `k1` defaults to 1, rest 0) |
+| *your `kN` aliases* | Whatever you name a constant knob (e.g. `gamma`)         |
 | `ref.r ref.g ref.b` | The Reference Colour knob (RGB), default `0`            |
-| *your variables* | Whatever you declare in the Variables block (incl. `k`-aliases) |
+| *your variables* | Whatever you name in the Variables rows                    |
 
 The `k1..k4`/aliases, `ref`, **Mix** and **Clamp Output** mirror the companion
 Matchbox build, so the OFX is a superset: type any expression *and* drive it live
