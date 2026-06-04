@@ -1,0 +1,11 @@
+# Build artifacts
+*.o
+*.ofx
+*.ofx.bundle/
+test_expr
+
+# Local OpenFX SDK checkout (cloned for builds, not vendored)
+/openfx/
+
+# OS / editor cruft
+.DS_Store
