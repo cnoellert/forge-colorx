@@ -270,8 +270,10 @@ CPU evaluator is the **numeric oracle** for every target.
      compiles each to PTX via `libnvrtc` — **no GPU needed** (NVRTC is a runtime
      compiler), the analogue of the macOS `xcrun metal` check. CI `cuda` job
      installs `nvidia-cuda-toolkit`, locates `nvrtc.h`/`libnvrtc`, builds + runs it.
-     (Header verified to compile as plain C++ locally; NVRTC/PTX correctness is
-     gated in CI since this Mac has no CUDA toolchain.)
+     **CI-verified GREEN** (NVRTC 12.0): scalar battery → 143 KB PTX, per-pixel
+     `exprKernel` → 7 KB PTX, only benign unused-helper warnings. (CI caught a real
+     NVRTC overload-ambiguity our local C++ check couldn't — `pow/fmax/fmod(float,
+     double)` — fixed by the double-widening above; this Mac has no CUDA toolchain.)
   3. ⏭ **NEXT — runtime parity on the user's Linux/NVIDIA box.** Add the GPU
      differential run (driver API: load the NVRTC PTX, dispatch over random inputs,
      diff vs `eval()` — expect deterministic ~float precision, value-noise exact,
