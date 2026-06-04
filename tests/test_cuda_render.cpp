@@ -129,6 +129,9 @@ int main() {
             std::printf("cudaRender failed [case %zu]: %s\n", ci, err.c_str());
             return 1;
         }
+        // cudaRender now dispatches asynchronously on our stream (the OFX host
+        // would own this sync); we own the stream here, so sync before reading.
+        cuStreamSynchronize(stream);
         cuMemcpyDtoH(outPix.data(), dDst, bytes);
 
         // CPU reference: replicate ExpressionProcessor's binding with eval()

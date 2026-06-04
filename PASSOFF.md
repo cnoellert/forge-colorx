@@ -128,14 +128,14 @@ These were required to actually run in Resolve and are now in the source:
 
 ### Open loose ends (small)
 
-- **`flame-01`: installed OFX is the CUDA path-marker diagnostic build**
-  (`-DEXPR_PATH_LOG` → appends to `/tmp/expr_path.log` every render; harmless on a
-  testbed but not for production). It's the WITH_CUDA build, so it needs
-  `libnvrtc.so.12` reachable via its baked rpath (the `corridorkey-cuda` conda env)
-  + the system `libcuda.so.1`. Swap in a clean (no-marker) build with the same
-  `make WITH_CUDA=1 …` minus the `-DEXPR_PATH_LOG` in `CUDA_INC`, then
-  `sudo cp -R …/Linux-64-debug/Expression.ofx.bundle /usr/OFX/Plugins/` and the
-  user relaunches Flame. `/tmp/expr_path.log` on `flame-01` is throwaway evidence.
+- **`flame-01`: installed OFX is now the clean + async WITH_CUDA build** (no marker;
+  `/tmp/expr_path.log` removed). It needs `libnvrtc.so.12` reachable via its baked
+  rpath (the `corridorkey-cuda` conda env) + the system `libcuda.so.1` — both
+  resolve. A Flame relaunch picks it up (the previous marker build was loaded in the
+  running Flame at the time of the swap). To rebuild: `make WITH_CUDA=1
+  CUDA_INC="-I…/cuda_nvrtc/include -I…/cuda_runtime/include"
+  CUDA_LIB="-L…/cuda_nvrtc/lib -l:libnvrtc.so.12 -lcuda -Wl,-rpath,…/cuda_nvrtc/lib"`
+  (add `-DEXPR_PATH_LOG` into `CUDA_INC` only for a diagnostic marker build).
 - Throwaway test scaffolding to delete: Flame batch groups **`FCX_OFX_TEST`** and
   **`FCX_METAL_TEST`** on the portofino desktop; Resolve project **`FCX_METAL_TEST`**
   (timeline + Fusion comp); `/tmp/fcx_metal*.exr` and `/tmp/fcx_flame_*.exr`;
@@ -314,7 +314,8 @@ CPU evaluator is the **numeric oracle** for every target.
      `ExprMetal.h/.mm`: NVRTC-compiles `buildCudaPixelKernel()` (cached by source,
      `--fmad=false`), loads into the host's current CUDA context, launches
      `exprKernel` on `args.pCudaStream` over the host's device buffers
-     (`cuStreamSynchronize` in v1). `Expression.cpp` adds `renderCuda()` + a
+     (**async dispatch** — no synchronize; the host owns/syncs the stream per the
+     OFX-CUDA contract). `Expression.cpp` adds `renderCuda()` + a
      `render()` branch behind `hostDrivesCudaSafely() && args.isEnabledCudaRender &&
      args.pCudaStream`, and `describe()` `setSupportsCudaRender(true)` — **host-gated
      to Resolve** exactly like `hostDrivesMetalSafely` (Flame is never advertised
@@ -339,8 +340,10 @@ CPU evaluator is the **numeric oracle** for every target.
      CUDA context is ever created there.
      ⏭ **Still open:** in-host verify of the CUDA *render path* itself in **Linux
      Resolve Studio** (the analogue of the Metal Resolve verification — Resolve is
-     **not installed on `flame-01`**, and OFX needs Resolve *Studio*; paths in
-     [[flame-01-linux-testbed]]); then drop `cuStreamSynchronize` for async dispatch.
+     **not installed on `flame-01`**; OFX needs Resolve *Studio*; the user is
+     arranging an install; paths in [[flame-01-linux-testbed]]). Async dispatch is
+     already in (the pixel test syncs its own stream and still matches the CPU
+     binding); the in-host drive will confirm the host's stream ordering end-to-end.
 - **Phase 4:** wire GPU into `render()` with CPU fallback; close GLSL/Matchbox.
 
 OFX GPU refs: `openfx/include/ofxGPURender.h`, and the OpenFX/Support GPU bits.
@@ -386,6 +389,11 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Session history (newest first)
 
+- GPU Phase 3 (async dispatch + clean install): `cudaRender()` now enqueues on the
+  host stream and returns without synchronizing (OFX-CUDA contract); pixel test syncs
+  its own stream and still matches the CPU binding. Clean (no-marker) WITH_CUDA bundle
+  built + installed to `flame-01:/usr/OFX/Plugins` (marker log removed). Picks up on
+  next Flame relaunch.
 - GPU Phase 3 (Flame CPU-load safety check): the CUDA-enabled bundle loads +
   renders in Linux Flame 2026.2.1 (`flame-01`) on the CPU path — no crash, OFX cache
   re-registered, marker `cudaEnabled=0 branch=cpu` (host-gate holds; the new

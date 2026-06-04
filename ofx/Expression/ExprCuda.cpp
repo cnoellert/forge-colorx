@@ -145,19 +145,17 @@ bool cudaRender(void* stream,
     const unsigned gy = (unsigned)((h + by - 1) / by);
     CUstream s = (CUstream)stream;
 
+    // Async dispatch per the OFX-CUDA contract: enqueue exprKernel on the host's
+    // stream and return WITHOUT synchronizing. The host owns the stream and
+    // sequences/synchronizes work on it — subsequent ops it enqueues are ordered
+    // after this launch, and it syncs before reading the result. A launch-time
+    // error surfaces here; a kernel runtime fault surfaces at the host's next sync
+    // on the stream. (Standalone tests that own their own stream must
+    // cuStreamSynchronize before reading the output back — see test_cuda_render.cpp.)
     CUresult rc = cuLaunchKernel(fn, gx, gy, 1, bx, by, 1, 0, s, kargs, nullptr);
     if (rc != CUDA_SUCCESS) {
         const char* m = nullptr; cuGetErrorString(rc, &m);
         err = std::string("cuLaunchKernel failed: ") + (m ? m : "?");
-        return false;
-    }
-    // v1: wait for completion (analogue of Metal's waitUntilCompleted). The OFX
-    // spec allows returning while the stream is in flight; switch to async once
-    // the path is host-confirmed (see PASSOFF).
-    rc = cuStreamSynchronize(s);
-    if (rc != CUDA_SUCCESS) {
-        const char* m = nullptr; cuGetErrorString(rc, &m);
-        err = std::string("cuStreamSynchronize failed: ") + (m ? m : "?");
         return false;
     }
     return true;
