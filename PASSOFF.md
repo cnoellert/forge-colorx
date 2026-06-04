@@ -21,6 +21,7 @@ variables, so an expression behaves the same in either tool.
 forge-colorx/
 ├── README.md                      project overview + chooser table
 ├── PASSOFF.md                     this file
+├── PRESETS.md                     validated copy-paste effect gallery (20 presets)
 ├── .github/workflows/ci.yml       tests + transpiler diff + per-OS bundle artifacts
 ├── tests/
 │   ├── test_expr.cpp              36 evaluator unit tests
@@ -356,7 +357,27 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
   evaluate live. The Matchbox build instead reproduces Nuke's whole function
   library in GLSL and puts the four channel formulas in an editable source
   block (recompile to apply), with `k1..k4`/`ref` knobs for live tweaks. The
-  **OFX** build is where typed-at-runtime expressions actually happen.
+  **OFX** build is where typed-at-runtime expressions actually happen. We chose to
+  **enrich the OFX rather than chase Matchbox parity** for live control (the
+  Matchbox can't take typed expressions at all).
+- **OFX param/UI model (LANDED after much iteration — don't re-litigate).** The
+  panel is: **Channels** = four expression boxes `r=/g=/b=/a=`; **Variables** = ONE
+  multi-line box, `name = formula` per statement separated by `;` *or* newline
+  (derived values like `lum = 0.2126*r+...`); **Constants** = `k1..k4` numeric
+  sliders, each with an optional `kName` alias box (name `k1` "gamma" → `gamma`
+  drives off the k1 slider); plus **Reference Colour** (`ref.r/.g/.b`), **Mix**
+  (blend original↔result), **Clamp Output**. All of it parses into one
+  `ExprContext.derived` (slot, Program) list (constants first, then variables) shared
+  by the CPU + Metal/CUDA paths. **`t` is a Nuke-parity alias for `frame`.**
+  - **WHY the Variables block is one box, not name/formula rows:** Flame's OFX host
+    **does not render labels on text params** (only on numeric/colour/bool), **and
+    collapses newlines in string params**, **and** doesn't expose OFX params to its
+    Python API. So separate unlabeled name/formula boxes were unusable in Flame
+    (scattered across auto-laid-out columns); a single self-labelling block (each
+    line says what it is, `;`-separated) is the one text layout Flame can't garble.
+    The named-`k` constant rows survive as pairs only because the labelled slider
+    anchors the alias box. (All of this renders cleanly as labelled pages/tabs in
+    Resolve/Nuke — it's purely a Flame-host limitation.) See [[flame-ofx-bridge]].
 - **`noise()` is classic Perlin gradient noise** (Gustavson/Ashima `cnoise`,
   tableless computable permutation `permute(x)=mod289((34x+1)x)`), signed ~`[-1,1]`,
   deliberately identical across all builds. The OFX C-family (`ev_p*` in
@@ -405,14 +426,15 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
   checkerboard/stripes/rings/flower, plasma, Perlin clouds/marble, film grain, gamma/
   saturation/duotone/posterize/vignette/scanlines) with suggested k-knob values. All
   compile-checked against the parser. Linked from both READMEs.
-- OFX params reorg: split the UI into four labelled pages (Channels / Variables /
-  Constants / Output) and made the k-knobs **nameable** — an optional `kN name`
-  alias per knob (name `k1` "gamma" → `gamma` resolves to the k1 slider). Kept BOTH
-  kinds of named token: Variables = name+formula (derived), Constants = name+slider
-  (dialed). Refactored the temp machinery into a general `derived` (slot, Program)
-  list shared by CPU + GPU. Also added `t` as a Nuke-parity alias for `frame`.
-  (Decision: Flame's bridge exposes no OFX params to Python — k1 reads None, hasattr
-  lies — so param/animation-editor checks are UI-only; see [[flame-ofx-bridge]].)
+- OFX params reorg → **landed on the hybrid layout** (see the "OFX param/UI model"
+  design decision above for the final state). Path there: pages + nameable constants
+  + name/formula variable rows → tried collapsing variables to one block → tried one
+  combined script box → reverted to structured → settled on the hybrid (channel
+  boxes + ONE self-labelling Variables block + named-`k` constant rows). The driver:
+  Flame's OFX host won't label text params, collapses newlines (so `;` is the
+  statement separator), and exposes no OFX params to Python (k1 reads None, hasattr
+  lies — UI checks only; see [[flame-ofx-bridge]]). Generalised the temps into one
+  `derived` (slot, Program) list shared by CPU + GPU; added `t` = `frame` alias.
 - OFX user-constant knobs: added `k1..k4` (animatable scalars), `ref` colour
   (`ref.r/.g/.b`), `Mix`, `Clamp Output` to the OFX, bound as expression variables
   (slots 11..17, before temps) + output post-ops, mirroring the Matchbox so the OFX
@@ -480,8 +502,17 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 ## Continuing with Claude
 
 This session is scoped to `cnoellert/forge-colorx` and commits/pushes directly to
-`main`. There are **memory files** under the project's memory dir worth reading:
-`resolve-launch-control`, `resolve-ofx-verification`, `flame-ofx-bridge` (host
-quirks + how to drive/verify the plugin). The live Flame bridge is the
-`forge-core` MCP (`flame_ping`, `flame_execute_python`). Good first ask to resume:
-**"continue GPU Phase 2 — the Metal back-end."**
+`main` (the user runs the actual `git push`). There are **memory files** under the
+project's memory dir worth reading: `resolve-launch-control`,
+`resolve-ofx-verification`, `flame-ofx-bridge`, `flame-01-linux-testbed` (host
+quirks, the CUDA conda-env build recipe, how to drive/verify the plugin). The live
+Flame bridge is the `forge-core` MCP (`flame_ping`, `flame_execute_python`) — note it
+talks to the **local Mac Flame**, not `flame-01`.
+
+State as of this handoff: GPU Phases 1–3 done and GPU-verified (Metal dual-host;
+CUDA on `flame-01`), real Perlin + `random()` parity across all 5 back-ends, the OFX
+control set finalised (hybrid layout + `t` alias), and `PRESETS.md` shipped.
+**Good first asks to resume:** (a) in-host verify the **CUDA render path in Linux
+Resolve Studio** once Resolve is installed on `flame-01` (the last open GPU item);
+(b) **universal macOS build** + tag **v1.0**; (c) optionally load the **Matchbox node
+in Flame** (deprioritised — can't be driven like the OFX).
