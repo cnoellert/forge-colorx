@@ -199,12 +199,30 @@ CPU evaluator is the **numeric oracle** for every target.
      variable all match to ~1e-7. The macOS bundle builds + links (arm64, exports
      `OfxGetPlugin`, links Metal/Foundation). CI offline-compiles both the scalar
      and the production pixel kernel with `xcrun metal`.
-  4. ⏭ **NEXT — host-verify in Resolve on this Mac.** Load the bundle, render a
-     known input through the Metal path, EXR-diff vs the CPU path (expect ~float
-     epsilon for deterministic exprs). Confirm Resolve actually drives the Metal
-     render (sets `MetalEnabled` + passes MTLBuffers); if not, the CPU fallback
-     still renders correctly. Then consider dropping the `waitUntilCompleted` for
-     async dispatch per the OFX spec.
+  4. **Host-verified in Resolve (loads + renders correct; path attribution TBD).**
+     The Metal-linked bundle **loads and instantiates in DaVinci Resolve Studio
+     20.3.1.6** (macOS arm64) — `setSupportsMetalRender(true)` + the Metal linkage
+     did **not** break host loading (the OFX node `ofx.tv.diff.Expression` creates,
+     exposes its 61 inputs, and connects Background→Expression→MediaOut). A
+     single-frame Deliver render to EXR through the node returned **exact
+     passthrough 0.300000 / 0.600000 / 0.900000** (identity defaults), clean log,
+     no `kOfxStatFailed`. Driven from the scripting harness in
+     [[resolve-ofx-verification]].
+     - ⏭ **Open: which path ran.** Pixels are identical whether Resolve drove our
+       Metal kernel or the CPU fallback, so this render does **not** prove the GPU
+       path executed. Resolve's Fusion OFX host is CPU-leaning and may not set
+       `kOfxImageEffectPropMetalEnabled` for this node at all. To attribute the
+       path, build with a one-line marker in `renderMetal()`/the CPU branch
+       (gated behind a build flag, e.g. `-DEXPR_PATH_LOG`) that records whether
+       `args.isEnabledMetalRender` was set and which branch executed, reinstall,
+       relaunch, re-render, read the marker. Until then: GPU path is proven
+       correct **off-host** (test_metal_render, ~1e-7) and the plugin is proven
+       correct **in-host**; the join — Resolve actually dispatching our Metal
+       kernel — is unconfirmed.
+     - Also still open: drop `waitUntilCompleted` for async dispatch per the OFX
+       spec once the path is confirmed.
+     - Throwaway state left behind: Resolve project **`FCX_METAL_TEST`** (timeline
+       `FCX_METAL_TL` + a Fusion comp) and `/tmp/fcx_metal*.exr`. Safe to delete.
   - **Noise parity (resolved for value-noise; `random()` caveated).** The noise
     sub-library is now computed in **float on every target** (`ev_*f` in
     `ExprEval.h`, `exh_*` in `ExprKernel.h` + `ExprKernelMetal.h`), so the CPU
@@ -267,7 +285,10 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 - GPU Phase 2 (render wiring): per-pixel Metal kernel builder + `ExprMetal.mm`
   dispatch bridge wired into `render()` (CPU fallback), `setSupportsMetalRender`,
   Darwin-only Makefile. Pixel path GPU-verified vs the CPU binding
-  (`test_metal_render.mm`, ~1e-7); bundle builds+links. Resolve host-verify next.
+  (`test_metal_render.mm`, ~1e-7); bundle builds+links. **Host-verified in Resolve
+  Studio 20.3.1.6:** the Metal-linked node loads/instantiates and renders exact
+  passthrough — but whether Resolve drives our Metal kernel vs the CPU fallback
+  is not yet attributed (needs a path-marker build).
 - GPU Phase 2 (noise parity): float-internal value-noise so CPU == GPU
   (bit-identical value-noise; `random()` still caveated). 
 - GPU Phase 2 (foundation): Metal MSL prelude (`ExprKernelMetal.h`) + real-GPU
