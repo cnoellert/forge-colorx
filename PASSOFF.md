@@ -99,11 +99,20 @@ These were required to actually run in Resolve and are now in the source:
 
 ### NOT yet verified (next person / next session)
 
-- **Linux pixel-verification.** The Linux x86-64 bundle builds on CI but hasn't
-  been *loaded* in a real Linux Flame/Resolve. The user HAS a Linux Flame/Resolve
-  workstation (NVIDIA) — that's the test bed. The Resolve scripting harness ports
-  over with Linux paths: `RESOLVE_SCRIPT_API=/opt/resolve/Developer/Scripting`,
-  `RESOLVE_SCRIPT_LIB=/opt/resolve/libs/Fusion/fusionscript.so`.
+- ✅ **Linux pixel-verification — DONE (Flame).** The OFX was **built natively on
+  `flame-01`** (RHEL 9.5, NVIDIA RTX 5000 Ada; `ssh flame-01`) — native because the
+  Ubuntu CI artifact needs glibc ~2.39 while RHEL 9.5 has 2.34; the native bundle
+  needs only `GLIBC_2.29`. Installed to `/usr/OFX/Plugins`, it **loads and renders
+  in Linux Flame 2026.2.1**: registered in the OFX cache as `tv.diff.Expression`,
+  log shows `Obtained handle … / Instanciating tv.diff.Expression`, no
+  `kOfxStatFailed`. (Native unit + transpile tests also pass on the box.) Build:
+  `rsync` the tree to `~/forge-colorx`, `git clone --depth1 openfx`, `cp -r
+  ofx/Expression openfx/Support/Plugins/`, `make … DEBUGFLAG=-O2`. Still open on
+  Linux: pixel-level EXR check + a Linux **Resolve** load (paths
+  `RESOLVE_SCRIPT_API=/opt/resolve/Developer/Scripting`,
+  `RESOLVE_SCRIPT_LIB=/opt/resolve/libs/Fusion/fusionscript.so`). NOTE: `flame-01`
+  has **no CUDA toolkit yet** (`nvcc`/`nvrtc` absent) — install it before the CUDA
+  Phase 3 runtime-parity + render-wiring work there.
 - **Matchbox node loaded in Flame** (GPU compile) — `shader_builder` accepts it
   but it hasn't been loaded as a Matchbox node in Flame.
 - **Universal macOS build** (arm64 + x86_64) for Intel-Mac — `Makefile.master`
@@ -317,14 +326,20 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
    behind `args.isEnabledMetalRender` with a CPU fallback, then EXR-diff vs CPU in
    Resolve on this Mac. Decide the noise/random float-parity question first (see
    the KNOWN PARITY GAP note) — it affects whether GPU noise matches CPU noise.
-2. **GPU Phase 3 — CUDA**, with runtime parity on the user's Linux workstation.
-3. Linux pixel-verification of the OFX in a real Linux Flame/Resolve.
+2. **GPU Phase 3 — CUDA**, with runtime parity on `flame-01` (RTX 5000 Ada).
+   Install the CUDA toolkit there first (`nvcc`/`nvrtc` absent), then the driver-API
+   differential run + render wiring.
+3. ✅ Linux pixel-verification of the OFX in Linux Flame 2026.2.1 (`flame-01`) —
+   loads + renders. Remaining: Linux Resolve load + a pixel-level EXR check.
 4. Load/verify the Matchbox node in Flame (GPU compile).
 5. Nice-to-haves: user-constant params (`k1..k4`/`ref`) in the OFX UI; real
    Perlin (both builds); universal macOS build; tag **v1.0**.
 
 ## Session history (newest first)
 
+- Linux pixel-verification: OFX built natively on `flame-01` (RHEL 9.5, RTX 5000
+  Ada) and loaded + rendered in Linux Flame 2026.2.1 (`tv.diff.Expression` in the
+  OFX cache, clean instantiate, no errors). Native build needed for glibc compat.
 - GPU Phase 3 (foundation): `ExprKernelCuda.h` (CUDA C prelude + scalar/pixel kernel
   builders, float-exact noise) + `tests/test_cuda.cpp` NVRTC compile-check + a CI
   `cuda` job. Header compiles as C++ locally; PTX correctness gated in CI (no CUDA
