@@ -33,42 +33,55 @@ static inline double exh_smoothstep(double a, double b, double x) {
 }
 
 // --- value noise / random (must match ev_* in ExprEval.h bit-for-bit) --------
-static inline double exh_fract(double x) { return x - floor(x); }
-static inline double exh_hash3(double x, double y, double z) {
-    double px = exh_fract(x * 0.3183099 + 0.1) * 17.0;
-    double py = exh_fract(y * 0.3183099 + 0.1) * 17.0;
-    double pz = exh_fract(z * 0.3183099 + 0.1) * 17.0;
-    return exh_fract(px * py * pz * (px + py + pz));
+// Computed in FLOAT (not double): the GPU back-ends are float-only, so the noise
+// sub-library is float on every target to render identical noise on CPU and GPU.
+// value-noise is +,-,*,floor only -> IEEE-exact and bit-identical; random() uses
+// sinf (a tiny cross-vendor ULP residual vs the GPU). Mirrors ev_*f in ExprEval.h
+// and exh_* in ExprKernelMetal.h; the differential tests guard against drift.
+static inline float exh_fractf(float x) { return x - floorf(x); }
+static inline float exh_hash3f(float x, float y, float z) {
+    float px = exh_fractf(x * 0.3183099f + 0.1f) * 17.0f;
+    float py = exh_fractf(y * 0.3183099f + 0.1f) * 17.0f;
+    float pz = exh_fractf(z * 0.3183099f + 0.1f) * 17.0f;
+    return exh_fractf(px * py * pz * (px + py + pz));
 }
-static inline double exh_vnoise(double x, double y, double z) {
-    double ix = floor(x), iy = floor(y), iz = floor(z);
-    double fx = x - ix, fy = y - iy, fz = z - iz;
-    double ux = fx * fx * (3.0 - 2.0 * fx);
-    double uy = fy * fy * (3.0 - 2.0 * fy);
-    double uz = fz * fz * (3.0 - 2.0 * fz);
-    double c000 = exh_hash3(ix,     iy,     iz),     c100 = exh_hash3(ix+1.0, iy,     iz);
-    double c010 = exh_hash3(ix,     iy+1.0, iz),     c110 = exh_hash3(ix+1.0, iy+1.0, iz);
-    double c001 = exh_hash3(ix,     iy,     iz+1.0), c101 = exh_hash3(ix+1.0, iy,     iz+1.0);
-    double c011 = exh_hash3(ix,     iy+1.0, iz+1.0), c111 = exh_hash3(ix+1.0, iy+1.0, iz+1.0);
-    double x00 = c000 + (c100 - c000) * ux, x10 = c010 + (c110 - c010) * ux;
-    double x01 = c001 + (c101 - c001) * ux, x11 = c011 + (c111 - c011) * ux;
-    double y0 = x00 + (x10 - x00) * uy, y1 = x01 + (x11 - x01) * uy;
+static inline float exh_vnoisef(float x, float y, float z) {
+    float ix = floorf(x), iy = floorf(y), iz = floorf(z);
+    float fx = x - ix, fy = y - iy, fz = z - iz;
+    float ux = fx * fx * (3.0f - 2.0f * fx);
+    float uy = fy * fy * (3.0f - 2.0f * fy);
+    float uz = fz * fz * (3.0f - 2.0f * fz);
+    float c000 = exh_hash3f(ix,      iy,      iz),      c100 = exh_hash3f(ix+1.0f, iy,      iz);
+    float c010 = exh_hash3f(ix,      iy+1.0f, iz),      c110 = exh_hash3f(ix+1.0f, iy+1.0f, iz);
+    float c001 = exh_hash3f(ix,      iy,      iz+1.0f), c101 = exh_hash3f(ix+1.0f, iy,      iz+1.0f);
+    float c011 = exh_hash3f(ix,      iy+1.0f, iz+1.0f), c111 = exh_hash3f(ix+1.0f, iy+1.0f, iz+1.0f);
+    float x00 = c000 + (c100 - c000) * ux, x10 = c010 + (c110 - c010) * ux;
+    float x01 = c001 + (c101 - c001) * ux, x11 = c011 + (c111 - c011) * ux;
+    float y0 = x00 + (x10 - x00) * uy, y1 = x01 + (x11 - x01) * uy;
     return y0 + (y1 - y0) * uz;
 }
-static inline double exh_noise(double x, double y, double z) { return exh_vnoise(x, y, z) * 2.0 - 1.0; }
+static inline double exh_noise(double x, double y, double z) {
+    return (double)(exh_vnoisef((float)x, (float)y, (float)z) * 2.0f - 1.0f);
+}
 static inline double exh_random(double x, double y, double z) {
-    double s = sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453;
-    return exh_fract(s);
+    float s = sinf((float)x * 12.9898f + (float)y * 78.233f + (float)z * 37.719f) * 43758.5453f;
+    return (double)exh_fractf(s);
 }
 static inline double exh_fbm(double x, double y, double z, double oct, double lac, double gain) {
-    int o = (int)oct; double sum = 0, amp = 1, fr = 1;
-    for (int i = 0; i < o && i < 32; ++i) { sum += amp * exh_noise(x*fr, y*fr, z*fr); fr *= lac; amp *= gain; }
-    return sum;
+    int o = (int)oct; float sum = 0.0f, amp = 1.0f, fr = 1.0f;
+    float fx = (float)x, fy = (float)y, fz = (float)z, fl = (float)lac, fg = (float)gain;
+    for (int i = 0; i < o && i < 32; ++i) {
+        sum += amp * (exh_vnoisef(fx*fr, fy*fr, fz*fr) * 2.0f - 1.0f); fr *= fl; amp *= fg;
+    }
+    return (double)sum;
 }
 static inline double exh_turb(double x, double y, double z, double oct, double lac, double gain) {
-    int o = (int)oct; double sum = 0, amp = 1, fr = 1;
-    for (int i = 0; i < o && i < 32; ++i) { sum += amp * fabs(exh_noise(x*fr, y*fr, z*fr)); fr *= lac; amp *= gain; }
-    return sum;
+    int o = (int)oct; float sum = 0.0f, amp = 1.0f, fr = 1.0f;
+    float fx = (float)x, fy = (float)y, fz = (float)z, fl = (float)lac, fg = (float)gain;
+    for (int i = 0; i < o && i < 32; ++i) {
+        sum += amp * fabsf(exh_vnoisef(fx*fr, fy*fr, fz*fr) * 2.0f - 1.0f); fr *= fl; amp *= fg;
+    }
+    return (double)sum;
 }
 
 // --- colour-space helpers ----------------------------------------------------

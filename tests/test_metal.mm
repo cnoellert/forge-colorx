@@ -177,7 +177,7 @@ int main(int argc, char** argv) {
             [cb waitUntilCompleted];
 
             const float* gpu = (const float*)[bout contents];
-            double localworst = 0.0; int bad = 0;
+            double localworst = 0.0; int bad = 0; int hashBad = 0;
             for (int t = 0; t < M; ++t) {
                 const float* vf = &vin[(size_t)t * NVARS];
                 double vd[NVARS];
@@ -190,13 +190,16 @@ int main(int argc, char** argv) {
                 else { double abse = std::fabs(a-b); e = std::min(abse, abse/(std::fabs(a)+1e-9)); }
                 localworst = std::max(localworst, e);
                 if (e > DET_TOL) ++bad;
+                if (e > 1e-2) ++hashBad;        // "materially different" pixel
             }
             bool hash = isHashBased(exprs[i]);
             double badFrac = bad / (double)M;
             if (hash) {
                 worstHash = std::max(worstHash, localworst);
-                std::printf("  hash  [%-28s] worst=%.3g  (informational)\n",
-                            exprs[i].c_str(), localworst);
+                // distinguish rare cell-boundary straddles (value-noise) from
+                // broadly-divergent large-argument sin (random()).
+                std::printf("  hash  [%-28s] worst=%.3g  %d/%d differ >1e-2  (informational)\n",
+                            exprs[i].c_str(), localworst, hashBad, M);
             } else {
                 worstDet = std::max(worstDet, localworst);
                 if (localworst <= DET_TOL) {

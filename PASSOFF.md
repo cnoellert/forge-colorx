@@ -182,18 +182,23 @@ CPU evaluator is the **numeric oracle** for every target.
      MTLBuffer when Metal-enabled), compile/cache MSL by expr-set hash, dispatch
      on the host command queue. Declare `setSupportsMetalRender(true)` in describe.
      Keep the CPU path as fallback. Then EXR-diff vs CPU in Resolve on this Mac.
-  - ⚠️ **KNOWN PARITY GAP (decision pending):** `noise()`/`random()`/`fBm`/
-    `turbulence` do **not** match between the float GPU and double CPU paths
-    (worst err ~1.96, i.e. fully divergent). Cause: the hash is
-    `fract(sin(...)*43758.5453)` / `fract(px*py*pz*…)` — `fract` of a
-    large-magnitude product loses all fractional precision in 32-bit float. The
-    deterministic math is unaffected. To make the GPU a faithful substitute when
-    an expression uses noise, the hash must become precision-stable across
-    float/double — either compute noise in float on **both** sides (change
-    `ev_noise`/`ev_random` in `ExprEval.h`) or swap in an integer-bit hash in all
-    back-ends (also touches the Matchbox GLSL, which is kept in noise-parity with
-    the OFX build). This changes noise *values* (PASSOFF already notes noise is
-    swappable), so it's flagged as a product decision rather than done silently.
+  - **Noise parity (resolved for value-noise; `random()` caveated).** The noise
+    sub-library is now computed in **float on every target** (`ev_*f` in
+    `ExprEval.h`, `exh_*` in `ExprKernel.h` + `ExprKernelMetal.h`), so the CPU
+    render and the GPU render produce the same noise. value-noise is `+,-,*,floor`
+    only → IEEE-exact and bit-identical:
+      - `noise/fBm/turbulence` on centred coords (`cx,cy`): **0/5000** samples
+        differ >1e-2 — full parity.
+      - `noise()` on large coords (e.g. `x*0.1`): ~**5/5000** differ, isolated
+        grid-line straddles where float `floor` lands a cell apart — same class
+        as the deterministic floor/step boundary behaviour, not a bug.
+      - `random()`: still ~**20%** of samples diverge. Its hash feeds `sin` huge
+        arguments (`x*12.9898+…` → ~1e5) whose range reduction differs by vendor;
+        float precision can't fix this. The only true fix is replacing `random()`
+        with an **integer-bit hash** across all back-ends (deferred — would change
+        random values and also touch the Matchbox GLSL). Treat GPU `random()` as
+        not pixel-matching the CPU until then. (This changed the CPU noise values
+        slightly vs the old double path; PASSOFF always noted noise is swappable.)
 - **Phase 3 (CUDA):** `ExprKernelCuda.h`; NVRTC compile; add an `nvcc/nvrtc`
   *compile-check* CI job (no GPU needed); runtime parity on the user's Linux box.
 - **Phase 4:** wire GPU into `render()` with CPU fallback; close GLSL/Matchbox.

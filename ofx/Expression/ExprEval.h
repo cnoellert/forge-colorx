@@ -41,32 +41,40 @@ enum FuncId {
 };
 
 // ---- noise helpers (match the Matchbox version for cross-tool parity) -------
-inline double ev_fract(double x) { return x - std::floor(x); }
-inline double ev_hash3(double x, double y, double z) {
-    double px = ev_fract(x * 0.3183099 + 0.1) * 17.0;
-    double py = ev_fract(y * 0.3183099 + 0.1) * 17.0;
-    double pz = ev_fract(z * 0.3183099 + 0.1) * 17.0;
-    return ev_fract(px * py * pz * (px + py + pz));
+// Computed in FLOAT, not double, so the CPU evaluator renders identical noise to
+// the GPU back-ends (Metal/CUDA are float-only). value-noise uses only +,-,*,floor
+// (IEEE-exact -> bit-identical on any float hardware); random() uses sinf and so
+// keeps a tiny (~1e-3) cross-vendor ULP residual vs the GPU. The float helpers
+// here are mirrored verbatim by exh_* in ExprKernel.h (CPU transpile prelude) and
+// ExprKernelMetal.h (MSL); the differential tests guard the three against drift.
+inline float ev_fractf(float x) { return x - std::floor(x); }
+inline float ev_hash3f(float x, float y, float z) {
+    float px = ev_fractf(x * 0.3183099f + 0.1f) * 17.0f;
+    float py = ev_fractf(y * 0.3183099f + 0.1f) * 17.0f;
+    float pz = ev_fractf(z * 0.3183099f + 0.1f) * 17.0f;
+    return ev_fractf(px * py * pz * (px + py + pz));
 }
-inline double ev_vnoise(double x, double y, double z) {
-    double ix = std::floor(x), iy = std::floor(y), iz = std::floor(z);
-    double fx = x - ix, fy = y - iy, fz = z - iz;
-    double ux = fx * fx * (3.0 - 2.0 * fx);
-    double uy = fy * fy * (3.0 - 2.0 * fy);
-    double uz = fz * fz * (3.0 - 2.0 * fz);
-    double c000 = ev_hash3(ix,     iy,     iz),     c100 = ev_hash3(ix+1.0, iy,     iz);
-    double c010 = ev_hash3(ix,     iy+1.0, iz),     c110 = ev_hash3(ix+1.0, iy+1.0, iz);
-    double c001 = ev_hash3(ix,     iy,     iz+1.0), c101 = ev_hash3(ix+1.0, iy,     iz+1.0);
-    double c011 = ev_hash3(ix,     iy+1.0, iz+1.0), c111 = ev_hash3(ix+1.0, iy+1.0, iz+1.0);
-    double x00 = c000 + (c100 - c000) * ux, x10 = c010 + (c110 - c010) * ux;
-    double x01 = c001 + (c101 - c001) * ux, x11 = c011 + (c111 - c011) * ux;
-    double y0 = x00 + (x10 - x00) * uy, y1 = x01 + (x11 - x01) * uy;
+inline float ev_vnoisef(float x, float y, float z) {
+    float ix = std::floor(x), iy = std::floor(y), iz = std::floor(z);
+    float fx = x - ix, fy = y - iy, fz = z - iz;
+    float ux = fx * fx * (3.0f - 2.0f * fx);
+    float uy = fy * fy * (3.0f - 2.0f * fy);
+    float uz = fz * fz * (3.0f - 2.0f * fz);
+    float c000 = ev_hash3f(ix,      iy,      iz),      c100 = ev_hash3f(ix+1.0f, iy,      iz);
+    float c010 = ev_hash3f(ix,      iy+1.0f, iz),      c110 = ev_hash3f(ix+1.0f, iy+1.0f, iz);
+    float c001 = ev_hash3f(ix,      iy,      iz+1.0f), c101 = ev_hash3f(ix+1.0f, iy,      iz+1.0f);
+    float c011 = ev_hash3f(ix,      iy+1.0f, iz+1.0f), c111 = ev_hash3f(ix+1.0f, iy+1.0f, iz+1.0f);
+    float x00 = c000 + (c100 - c000) * ux, x10 = c010 + (c110 - c010) * ux;
+    float x01 = c001 + (c101 - c001) * ux, x11 = c011 + (c111 - c011) * ux;
+    float y0 = x00 + (x10 - x00) * uy, y1 = x01 + (x11 - x01) * uy;
     return y0 + (y1 - y0) * uz;
 }
-inline double ev_noise(double x, double y, double z) { return ev_vnoise(x, y, z) * 2.0 - 1.0; }
+inline double ev_noise(double x, double y, double z) {
+    return (double)(ev_vnoisef((float)x, (float)y, (float)z) * 2.0f - 1.0f);
+}
 inline double ev_random(double x, double y, double z) {
-    double s = std::sin(x * 12.9898 + y * 78.233 + z * 37.719) * 43758.5453;
-    return ev_fract(s);
+    float s = std::sin((float)x * 12.9898f + (float)y * 78.233f + (float)z * 37.719f) * 43758.5453f;
+    return (double)ev_fractf(s);
 }
 inline double ev_to_sRGB(double c)   { return (c <= 0.0031308) ? c * 12.92 : 1.055 * std::pow(c, 1.0/2.4) - 0.055; }
 inline double ev_from_sRGB(double c) { return (c <= 0.04045)   ? c / 12.92 : std::pow((c + 0.055)/1.055, 2.4); }
@@ -433,15 +441,17 @@ inline double Program::evalNode(int idx, const double* vars) const {
                 case F_RANDOM1: return ev_random(a0, 0, 0); case F_RANDOM2: return ev_random(a0, a1, 0);
                 case F_RANDOM3: return ev_random(a0, a1, a2);
                 case F_FBM: case F_TURB: {
+                    // float-internal to match exh_fbm/exh_turb on the GPU (see noise note)
                     int oct = (int)evalNode(n.args[3], vars);
-                    double lac = evalNode(n.args[4], vars), gain = evalNode(n.args[5], vars);
-                    double sum = 0, amp = 1, fr = 1;
+                    float lac = (float)evalNode(n.args[4], vars), gain = (float)evalNode(n.args[5], vars);
+                    float x0 = (float)a0, y0 = (float)a1, z0 = (float)a2;
+                    float sum = 0.0f, amp = 1.0f, fr = 1.0f;
                     for (int i = 0; i < oct && i < 32; ++i) {
-                        double v = ev_noise(a0 * fr, a1 * fr, a2 * fr);
+                        float v = ev_vnoisef(x0 * fr, y0 * fr, z0 * fr) * 2.0f - 1.0f;
                         sum += amp * (n.fid == F_TURB ? std::fabs(v) : v);
                         fr *= lac; amp *= gain;
                     }
-                    return sum;
+                    return (double)sum;
                 }
                 case F_FROM_SRGB: return ev_from_sRGB(a0); case F_TO_SRGB: return ev_to_sRGB(a0);
                 case F_FROM_REC709: return ev_from_rec709(a0); case F_TO_REC709: return ev_to_rec709(a0);
