@@ -23,6 +23,33 @@ jobs:
           c++ -std=c++11 -O2 -I ofx/Expression tests/test_transpile.cpp -o test_transpile
           ./test_transpile
 
+  metal:
+    name: metal back-end (MSL compile-check + GPU diff)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the Metal differential test
+        run: |
+          clang++ -std=c++17 -ObjC++ -O2 -I ofx/Expression tests/test_metal.mm \
+            -framework Metal -framework Foundation -o test_metal
+
+      # Offline MSL compile-check: emit the generated kernels and run them
+      # through Apple's `metal` compiler. This validates the ExprKernelMetal.h
+      # prelude + every emitted kernel body as real Metal Shading Language with
+      # NO GPU — the macOS runners are headless VMs. (The CUDA back-end will get
+      # the analogous nvrtc compile-check.)
+      - name: Compile emitted MSL with xcrun metal
+        run: |
+          ./test_metal --emit kernels.metal
+          xcrun -sdk macosx metal -c kernels.metal -o kernels.air
+          echo "MSL compiled clean"
+
+      # If the runner happens to expose a Metal device, run the real GPU
+      # differential check too; it SKIPs (exit 0) when none is present.
+      - name: Run the GPU differential test (SKIPs if headless)
+        run: ./test_metal
+
   build:
     name: build ${{ matrix.name }}
     needs: test

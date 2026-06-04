@@ -24,7 +24,8 @@ forge-colorx/
 ├── .github/workflows/ci.yml       tests + transpiler diff + per-OS bundle artifacts
 ├── tests/
 │   ├── test_expr.cpp              36 evaluator unit tests
-│   └── test_transpile.cpp         AST->kernel transpiler differential test (vs eval)
+│   ├── test_transpile.cpp         AST->kernel transpiler differential test (vs eval)
+│   └── test_metal.mm             real-GPU Metal differential test (vs eval oracle)
 ├── matchbox/ColorExpression/
 │   ├── ColorExpression.glsl       #version 120; full Nuke function library;
 │   │                              channel formulas in an EXPRESSION BLOCK
@@ -33,7 +34,8 @@ forge-colorx/
 └── ofx/Expression/
     ├── Expression.cpp             OFX plugin (params, render, channel dispatch)
     ├── ExprEval.h                 Pratt parser + evaluator + emitC() transpiler
-    ├── ExprKernel.h               exh_* helper prelude for transpiled kernels
+    ├── ExprKernel.h               exh_* helper prelude for transpiled kernels (CPU)
+    ├── ExprKernelMetal.h          exh_* prelude in Metal Shading Language (GPU)
     ├── Info.plist                 OFX bundle plist (required to load)
     ├── Makefile                   builds Expression.ofx.bundle
     └── README.md                  build/install + parity table + examples
@@ -143,6 +145,9 @@ Flame scan `/Library/OFX/Plugins` on macOS; **a host only re-reads OFX at launch
 ```bash
 g++ -std=c++11 -O2 -I ofx/Expression tests/test_expr.cpp      -o /tmp/te && /tmp/te
 c++ -std=c++11 -O2 -I ofx/Expression tests/test_transpile.cpp -o /tmp/tt && /tmp/tt
+# Metal GPU diff (macOS; needs a Metal device — SKIPs cleanly without one):
+clang++ -std=c++17 -ObjC++ -O2 -I ofx/Expression tests/test_metal.mm \
+    -framework Metal -framework Foundation -o /tmp/tm && /tmp/tm
 ```
 
 ## GPU render path (in progress)
@@ -158,13 +163,37 @@ CPU evaluator is the **numeric oracle** for every target.
 
 - **Phase 1 ✅ (done):** `emitC()` + `ExprKernel.h` (CPU prelude) +
   `test_transpile.cpp` differential test (2.22e-16, CI-gated).
-- **Phase 2 ⏭ (next — Metal, local on this Mac):**
-  1. `ExprKernelMetal.h` — `exh_*` in Metal Shading Language (port `ExprKernel.h`;
-     `float`, `metal::` builtins). 2. Emit a `kernel void` wrapper around the
-     `emitC()` body (varies/uniforms → threadgroup buffer). 3. In `Expression.cpp`,
-     detect `kOfxImageEffectPropMetalEnabled`/`args` Metal command queue, compile
-     MSL at render via `newLibraryWithSource` (cache by expr string), dispatch.
-     4. Verify in Resolve/Mac here, EXR-diff vs the CPU path. Keep CPU fallback.
+- **Phase 2 — Metal back-end (foundation ✅ done; render wiring ⏭ next):**
+  1. ✅ `ExprKernelMetal.h` — the `exh_*` helper library ported to Metal Shading
+     Language (`float`; `metal::` builtins; one shim, `hypot`, which MSL lacks).
+     Exposes the prelude as a runtime string (the OFX path compiles MSL at render
+     via `newLibraryWithSource:`) plus a `kernel void gen_N` wrapper builder.
+  2. ✅ **Real-GPU differential test** `tests/test_metal.mm` — builds MSL from the
+     `emitC()` bodies, compiles it on a real Metal device, dispatches one thread
+     per input vector, and diffs vs the CPU `eval()` oracle. **Verified on an
+     Apple M4 Max:** deterministic math worst error **2.75e-07** over 45 exprs ×
+     5000 inputs (float epsilon; 0 failures, 0 boundary cases). SKIPs (exit 0)
+     when no Metal device, so CI on headless macOS stays green. CI also runs an
+     **offline `xcrun metal` compile-check** of the emitted MSL (`--emit` mode) —
+     gating Metal syntax with no GPU, the analog of the planned CUDA nvrtc check.
+  3. ⏭ **NEXT — wire into `Expression.cpp render()`:** when `args.isEnabledMetalRender`
+     (Support lib already surfaces it + `args.pMetalCmdQ`), build the per-pixel
+     `kernel void` over the image `id<MTLBuffer>`s (`kOfxImagePropData` is a
+     MTLBuffer when Metal-enabled), compile/cache MSL by expr-set hash, dispatch
+     on the host command queue. Declare `setSupportsMetalRender(true)` in describe.
+     Keep the CPU path as fallback. Then EXR-diff vs CPU in Resolve on this Mac.
+  - ⚠️ **KNOWN PARITY GAP (decision pending):** `noise()`/`random()`/`fBm`/
+    `turbulence` do **not** match between the float GPU and double CPU paths
+    (worst err ~1.96, i.e. fully divergent). Cause: the hash is
+    `fract(sin(...)*43758.5453)` / `fract(px*py*pz*…)` — `fract` of a
+    large-magnitude product loses all fractional precision in 32-bit float. The
+    deterministic math is unaffected. To make the GPU a faithful substitute when
+    an expression uses noise, the hash must become precision-stable across
+    float/double — either compute noise in float on **both** sides (change
+    `ev_noise`/`ev_random` in `ExprEval.h`) or swap in an integer-bit hash in all
+    back-ends (also touches the Matchbox GLSL, which is kept in noise-parity with
+    the OFX build). This changes noise *values* (PASSOFF already notes noise is
+    swappable), so it's flagged as a product decision rather than done silently.
 - **Phase 3 (CUDA):** `ExprKernelCuda.h`; NVRTC compile; add an `nvcc/nvrtc`
   *compile-check* CI job (no GPU needed); runtime parity on the user's Linux box.
 - **Phase 4:** wire GPU into `render()` with CPU fallback; close GLSL/Matchbox.
@@ -194,8 +223,11 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Suggested next steps (in priority order)
 
-1. **GPU Phase 2 — Metal back-end** (see the GPU section above). The immediate
-   focus. Build/verify locally in Resolve on this Mac.
+1. **GPU Phase 2 — Metal back-end.** Foundation done (MSL prelude + GPU-verified
+   diff test). NEXT: wire the per-pixel Metal kernel into `Expression.cpp render()`
+   behind `args.isEnabledMetalRender` with a CPU fallback, then EXR-diff vs CPU in
+   Resolve on this Mac. Decide the noise/random float-parity question first (see
+   the KNOWN PARITY GAP note) — it affects whether GPU noise matches CPU noise.
 2. **GPU Phase 3 — CUDA**, with runtime parity on the user's Linux workstation.
 3. Linux pixel-verification of the OFX in a real Linux Flame/Resolve.
 4. Load/verify the Matchbox node in Flame (GPU compile).
@@ -204,6 +236,11 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Session history (newest first)
 
+- GPU Phase 2 (foundation): Metal MSL prelude (`ExprKernelMetal.h`) + real-GPU
+  differential test (`test_metal.mm`), verified on an Apple M4 Max — deterministic
+  math worst err 2.75e-07. CI compile-checks the MSL with `xcrun metal`. Found +
+  documented the float/double noise/random parity gap (decision pending). Render
+  wiring into `Expression.cpp` is the next step.
 - GPU Phase 1: AST→kernel transpiler + differential oracle test (CI-gated).
 - CI: per-OS `.ofx.bundle` artifacts (linux-x86-64 + macos-arm64).
 - OFX host-verified in Flame 2026.2.2 (typed `r=0.5` → exact 0.5).
