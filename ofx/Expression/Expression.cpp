@@ -39,6 +39,30 @@
 #include <utility>
 #endif
 
+// Opt-in render-path diagnostic (off in normal + CI builds). Build with
+// -DEXPR_PATH_LOG to record, per render, the OFX host name, whether the host
+// enabled Metal, and which branch actually executed — to confirm whether a given
+// host (Resolve, Flame, ...) drives our Metal kernel or the CPU fallback. Append
+// to /tmp/expr_path.log; read with `sort /tmp/expr_path.log | uniq -c`.
+#ifdef EXPR_PATH_LOG
+#include <cstdio>
+static void exprPathLog(int metalEnabled, const char* branch)
+{
+    const char* host = "?";
+    try {
+        OFX::ImageEffectHostDescription* h = OFX::getImageEffectHostDescription();
+        if (h) host = h->hostName.c_str();
+    } catch (...) {}
+    FILE* f = std::fopen("/tmp/expr_path.log", "a");
+    if (!f) return;
+    std::fprintf(f, "host=%s metalEnabled=%d branch=%s\n", host, metalEnabled, branch);
+    std::fclose(f);
+}
+#define EXPR_PATHLOG(me, br) exprPathLog((me), (br))
+#else
+#define EXPR_PATHLOG(me, br) ((void)0)
+#endif
+
 // ---- IEEE-754 half <-> float (Fusion/Resolve deliver 16-bit float images) ----
 static inline float halfToFloat(unsigned short h)
 {
@@ -378,8 +402,15 @@ void ExpressionPlugin::render(const OFX::RenderArguments& args)
 
 #ifdef HAVE_METAL
     // Prefer the GPU when the host is driving a Metal render; fall back to CPU.
-    if (args.isEnabledMetalRender && args.pMetalCmdQ && renderMetal(args, ctx))
-        return;
+    if (args.isEnabledMetalRender && args.pMetalCmdQ) {
+        bool gpu = renderMetal(args, ctx);
+        EXPR_PATHLOG(1, gpu ? "metal" : "metal-failed->cpu");
+        if (gpu) return;
+    } else {
+        EXPR_PATHLOG(args.isEnabledMetalRender ? 1 : 0, "cpu");
+    }
+#else
+    EXPR_PATHLOG(0, "cpu-no-haveMetal");
 #endif
 
     OFX::BitDepthEnum       depth = _dstClip->getPixelDepth();
