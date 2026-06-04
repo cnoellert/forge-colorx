@@ -57,6 +57,31 @@ jobs:
           ./test_metal
           ./test_metal_render
 
+  cuda:
+    name: cuda back-end (NVRTC compile-check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # NVRTC is a runtime compiler library — it turns our generated CUDA source
+      # into PTX with NO GPU, so this gates the CUDA codegen on a GPU-less runner
+      # (the analogue of the macОS `xcrun metal` check). The distro CUDA toolkit
+      # ships nvrtc.h + libnvrtc; we locate them rather than assume a fixed path.
+      - name: Install CUDA NVRTC
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nvidia-cuda-toolkit
+
+      - name: Build + run the NVRTC compile-check
+        run: |
+          NVRTC_H="$(dirname "$(find / -name nvrtc.h 2>/dev/null | head -1)")"
+          NVRTC_L="$(dirname "$(find / -name 'libnvrtc.so*' 2>/dev/null | head -1)")"
+          echo "nvrtc.h in: $NVRTC_H   libnvrtc in: $NVRTC_L"
+          test -n "$NVRTC_H" && test -n "$NVRTC_L" || { echo "::error::NVRTC not found"; exit 1; }
+          c++ -std=c++11 -O2 -I ofx/Expression -I"$NVRTC_H" \
+            tests/test_cuda.cpp -o test_cuda -L"$NVRTC_L" -lnvrtc
+          LD_LIBRARY_PATH="$NVRTC_L" ./test_cuda
+
   build:
     name: build ${{ matrix.name }}
     needs: test

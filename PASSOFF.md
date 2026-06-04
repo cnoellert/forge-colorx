@@ -26,7 +26,8 @@ forge-colorx/
 │   ├── test_expr.cpp              36 evaluator unit tests
 │   ├── test_transpile.cpp         AST->kernel transpiler differential test (vs eval)
 │   ├── test_metal.mm             real-GPU Metal scalar differential test (vs eval)
-│   └── test_metal_render.mm      real-GPU Metal pixel-path test (vs CPU binding)
+│   ├── test_metal_render.mm      real-GPU Metal pixel-path test (vs CPU binding)
+│   └── test_cuda.cpp             NVRTC compile-check for the CUDA kernels (no GPU)
 ├── matchbox/ColorExpression/
 │   ├── ColorExpression.glsl       #version 120; full Nuke function library;
 │   │                              channel formulas in an EXPRESSION BLOCK
@@ -38,6 +39,7 @@ forge-colorx/
     ├── ExprKernel.h               exh_* helper prelude for transpiled kernels (CPU)
     ├── ExprKernelMetal.h          MSL prelude + per-pixel kernel builder (GPU)
     ├── ExprMetal.h / ExprMetal.mm Obj-C++ Metal dispatch (compile/cache + encode)
+    ├── ExprKernelCuda.h           CUDA C prelude + kernel builders (NVRTC)
     ├── Info.plist                 OFX bundle plist (required to load)
     ├── Makefile                   builds Expression.ofx.bundle
     └── README.md                  build/install + parity table + examples
@@ -256,8 +258,31 @@ CPU evaluator is the **numeric oracle** for every target.
         random values and also touch the Matchbox GLSL). Treat GPU `random()` as
         not pixel-matching the CPU until then. (This changed the CPU noise values
         slightly vs the old double path; PASSOFF always noted noise is swappable.)
-- **Phase 3 (CUDA):** `ExprKernelCuda.h`; NVRTC compile; add an `nvcc/nvrtc`
-  *compile-check* CI job (no GPU needed); runtime parity on the user's Linux box.
+- **Phase 3 — CUDA (foundation ✅; runtime + render wiring ⏭):**
+  1. ✅ `ExprKernelCuda.h` — the `exh_*` helper library in CUDA C device code
+     (`__device__`; value-noise float-exact via `floorf`/`sinf`/`f`-literals so CUDA
+     noise == the CPU float noise == Metal). Scalar (`gen_N`) and per-pixel
+     (`exprKernel`) kernel builders mirror the Metal ones; `extern "C" __global__`
+     entry points so the driver API finds them unmangled. Uniforms struct is
+     byte-identical to `ExprMetalUniforms`.
+  2. ✅ `tests/test_cuda.cpp` — NVRTC **compile-check**: builds the CUDA source from
+     the `emitC()` bodies (scalar battery + a representative pixel kernel) and
+     compiles each to PTX via `libnvrtc` — **no GPU needed** (NVRTC is a runtime
+     compiler), the analogue of the macOS `xcrun metal` check. CI `cuda` job
+     installs `nvidia-cuda-toolkit`, locates `nvrtc.h`/`libnvrtc`, builds + runs it.
+     (Header verified to compile as plain C++ locally; NVRTC/PTX correctness is
+     gated in CI since this Mac has no CUDA toolchain.)
+  3. ⏭ **NEXT — runtime parity on the user's Linux/NVIDIA box.** Add the GPU
+     differential run (driver API: load the NVRTC PTX, dispatch over random inputs,
+     diff vs `eval()` — expect deterministic ~float precision, value-noise exact,
+     `random()` caveated as on Metal). Can't be written/verified blind here; do it
+     on the box.
+  4. ⏭ **Render wiring** — `ExprCuda` dispatch (NVRTC compile+cache, driver-API
+     launch on `args.pCudaStream`) + a `render()` branch behind
+     `args.isEnabledCudaRender`, **host-gated** like Metal (see
+     `hostDrivesMetalSafely` — add the CUDA analogue once we know which Linux hosts
+     drive OFX-CUDA safely). Makefile compiles the CUDA unit + links nvrtc/cuda only
+     where the toolkit is present. Build won't change on macOS.
 - **Phase 4:** wire GPU into `render()` with CPU fallback; close GLSL/Matchbox.
 
 OFX GPU refs: `openfx/include/ofxGPURender.h`, and the OpenFX/Support GPU bits.
@@ -298,6 +323,10 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Session history (newest first)
 
+- GPU Phase 3 (foundation): `ExprKernelCuda.h` (CUDA C prelude + scalar/pixel kernel
+  builders, float-exact noise) + `tests/test_cuda.cpp` NVRTC compile-check + a CI
+  `cuda` job. Header compiles as C++ locally; PTX correctness gated in CI (no CUDA
+  on this Mac). Runtime parity + render wiring pending the Linux/NVIDIA box.
 - GPU Phase 2 (render wiring + dual-host verify): per-pixel Metal kernel builder +
   `ExprMetal.mm` dispatch wired into `render()` (CPU fallback), Darwin-only Makefile.
   Pixel path GPU-verified vs CPU binding (`test_metal_render.mm`, ~1e-7).
