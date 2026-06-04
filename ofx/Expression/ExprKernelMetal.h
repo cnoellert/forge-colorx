@@ -171,6 +171,8 @@ inline std::string buildMetalPixelKernel(const std::string chan[4],
 "    int dstX1, dstY1, dstRowFloats;\n"
 "    int nComps, hasSrc;\n"
 "    float fwidth, fheight, frame;\n"
+"    float k1, k2, k3, k4, refr, refg, refb, mix;\n"
+"    int clampOut;\n"
 "};\n"
 "\n"
 "kernel void exprKernel(device const float* src [[buffer(0)]],\n"
@@ -193,7 +195,9 @@ inline std::string buildMetalPixelKernel(const std::string chan[4],
 "    float invHalfW = (halfW != 0.0) ? 1.0 / halfW : 0.0;\n"
 "    v[6] = ((float)gx - halfW) * invHalfW;\n"
 "    v[7] = ((float)gy - halfH) * invHalfW;\n"
-"    v[8] = U.fwidth; v[9] = U.fheight; v[10] = U.frame;\n";
+"    v[8] = U.fwidth; v[9] = U.fheight; v[10] = U.frame;\n"
+"    v[11] = U.k1; v[12] = U.k2; v[13] = U.k3; v[14] = U.k4;\n"
+"    v[15] = U.refr; v[16] = U.refg; v[17] = U.refb;\n";
     for (size_t t = 0; t < temps.size(); ++t)
         s += "    v[" + std::to_string(temps[t].first) + "] = (" + temps[t].second + ");\n";
     s +=
@@ -201,6 +205,8 @@ inline std::string buildMetalPixelKernel(const std::string chan[4],
 "    float o1 = (" + chan[1] + ");\n"
 "    float o2 = (" + chan[2] + ");\n"
 "    float o3 = (" + chan[3] + ");\n"
+"    if (U.clampOut != 0) { o0 = clamp(o0,0.0,1.0); o1 = clamp(o1,0.0,1.0); o2 = clamp(o2,0.0,1.0); o3 = clamp(o3,0.0,1.0); }\n"
+"    if (U.mix != 1.0) { o0 = r + (o0-r)*U.mix; o1 = g + (o1-g)*U.mix; o2 = b + (o2-b)*U.mix; o3 = a + (o3-a)*U.mix; }\n"
 "    int di = (gy - U.dstY1) * U.dstRowFloats + (gx - U.dstX1) * U.nComps;\n"
 "    if (U.nComps == 1) { dst[di] = o3; }\n"
 "    else { dst[di] = o0; dst[di+1] = o1; dst[di+2] = o2; if (U.nComps == 4) dst[di+3] = o3; }\n"

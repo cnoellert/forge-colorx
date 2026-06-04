@@ -23,6 +23,16 @@ struct MetalImageDesc {
     int   rowFloats = 0;      // row stride / sizeof(float)
 };
 
+// User-constant knobs (mirror the Matchbox): k1..k4 + ref colour bound as the
+// expression variables k1..k4 / ref.r/.g/.b; mix blends original<->result;
+// clampOut clamps the result to [0,1]. Passed into the kernel uniforms.
+struct ExprKnobs {
+    float k[4]   = {1, 0, 0, 0};
+    float ref[3] = {0, 0, 0};
+    float mix    = 1.0f;
+    int   clampOut = 0;
+};
+
 // Dispatch one render tile on the GPU using the host-supplied command queue.
 // `mslSource` must define `kernel void exprKernel(...)` exactly as produced by
 // buildMetalPixelKernel(). Compiled pipelines are cached by MSL source, so the
@@ -34,6 +44,7 @@ bool metalRender(void* commandQueue,
                  const MetalImageDesc& dst,
                  int rwX1, int rwY1, int rwX2, int rwY2,
                  int nComps, float width, float height, float frame,
+                 const ExprKnobs& knobs,
                  const std::string& mslSource,
                  std::string& err);
 

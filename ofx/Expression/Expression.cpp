@@ -159,7 +159,9 @@ static inline unsigned short floatToHalf(float f)
 #define kPluginName        "Expression"
 #define kPluginGrouping    "Color/Math"
 #define kPluginDescription "Per-channel math expressions, a re-creation of Nuke's Expression node.\n" \
-                           "Variables: r g b a, x y, cx cy, width height, frame, pi, plus your temps."
+                           "Variables: r g b a, x y, cx cy, width height, frame, pi, the k1..k4 and\n" \
+                           "ref.r/ref.g/ref.b knobs, plus your temps. Mix blends original<->result; Clamp "\
+                           "clamps to 0..1."
 #define kPluginIdentifier  "tv.diff.Expression"
 #define kPluginVersionMajor 1
 #define kPluginVersionMinor 0
@@ -167,8 +169,11 @@ static inline unsigned short floatToHalf(float f)
 // number of temp-variable rows, matching Nuke's Expression tab
 #define kNumTemps 4
 
-// indices of the fixed predefined variables in the variable buffer
-enum { V_R = 0, V_G, V_B, V_A, V_X, V_Y, V_CX, V_CY, V_WIDTH, V_HEIGHT, V_FRAME, V_FIXED_COUNT };
+// indices of the fixed predefined variables in the variable buffer. r..frame are
+// per-pixel / per-render; k1..k4 and ref.r/.g/.b are the user-constant knobs
+// (uniform across the frame) that bring the OFX in line with the Matchbox build.
+enum { V_R = 0, V_G, V_B, V_A, V_X, V_Y, V_CX, V_CY, V_WIDTH, V_HEIGHT, V_FRAME,
+       V_K1, V_K2, V_K3, V_K4, V_REFR, V_REFG, V_REFB, V_FIXED_COUNT };
 
 // ---- the compiled programs + everything the per-pixel loop needs -------------
 struct ExprContext {
@@ -178,6 +183,11 @@ struct ExprContext {
     int                      tempSlot[kNumTemps]; // -1 if that row is unused
     int                      nVars = 0;
     double                   width = 0, height = 0, frame = 0;
+    // user-constant knobs (mirror the Matchbox: k1..k4, ref colour, mix, clamp)
+    double                   k[4]   = {1, 0, 0, 0};   // k1 defaults to 1, rest 0
+    double                   ref[3] = {0, 0, 0};
+    double                   mixAmt = 1.0;            // 0 = original image, 1 = result
+    bool                     clampOut = false;        // clamp result to [0,1]
 };
 
 // ============================================================================
@@ -201,6 +211,10 @@ public:
         vars[V_WIDTH]  = _ctx->width;
         vars[V_HEIGHT] = _ctx->height;
         vars[V_FRAME]  = _ctx->frame;
+        vars[V_K1] = _ctx->k[0]; vars[V_K2] = _ctx->k[1];
+        vars[V_K3] = _ctx->k[2]; vars[V_K4] = _ctx->k[3];
+        vars[V_REFR] = _ctx->ref[0]; vars[V_REFG] = _ctx->ref[1]; vars[V_REFB] = _ctx->ref[2];
+        const double mixAmt = _ctx->mixAmt; const bool clampOut = _ctx->clampOut;
         const double halfW = _ctx->width  * 0.5;
         const double halfH = _ctx->height * 0.5;
         const double invHalfW = (halfW != 0.0) ? 1.0 / halfW : 0.0;
@@ -243,6 +257,15 @@ public:
                 out[1] = _ctx->chan[1].eval(&vars[0]);
                 out[2] = _ctx->chan[2].eval(&vars[0]);
                 out[3] = _ctx->chan[3].eval(&vars[0]);
+
+                // ---- output knobs: clamp then mix vs the original (matches the
+                //      Matchbox main(): clamp first, then mix(orig, result, amt)) ----
+                if (clampOut) for (int c = 0; c < 4; ++c)
+                    out[c] = out[c] < 0.0 ? 0.0 : (out[c] > 1.0 ? 1.0 : out[c]);
+                if (mixAmt != 1.0) {
+                    const double orig[4] = { r, g, b, a };
+                    for (int c = 0; c < 4; ++c) out[c] = orig[c] + (out[c] - orig[c]) * mixAmt;
+                }
 
                 // ---- write, remapping channels to the actual component layout ----
                 if (nComps == 1) {
@@ -292,6 +315,11 @@ public:
             _tempName[t] = fetchStringParam(n);
             _tempExpr[t] = fetchStringParam(e);
         }
+        _k1 = fetchDoubleParam("k1"); _k2 = fetchDoubleParam("k2");
+        _k3 = fetchDoubleParam("k3"); _k4 = fetchDoubleParam("k4");
+        _ref = fetchRGBParam("ref");
+        _mix = fetchDoubleParam("mix");
+        _clamp = fetchBooleanParam("clampOutput");
     }
 
     virtual void render(const OFX::RenderArguments& args);
@@ -319,13 +347,19 @@ private:
     OFX::StringParam* _exprB; OFX::StringParam* _exprA;
     OFX::StringParam* _tempName[kNumTemps];
     OFX::StringParam* _tempExpr[kNumTemps];
+    OFX::DoubleParam* _k1; OFX::DoubleParam* _k2;
+    OFX::DoubleParam* _k3; OFX::DoubleParam* _k4;
+    OFX::RGBParam*    _ref;
+    OFX::DoubleParam* _mix;
+    OFX::BooleanParam* _clamp;
 };
 
 void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContext& ctx)
 {
-    // fixed predefined variable names, in slot order
+    // fixed predefined variable names, in slot order (must match the V_* enum)
     static const char* fixed[V_FIXED_COUNT] =
-        { "r","g","b","a","x","y","cx","cy","width","height","frame" };
+        { "r","g","b","a","x","y","cx","cy","width","height","frame",
+          "k1","k2","k3","k4","ref.r","ref.g","ref.b" };
     ctx.names.assign(fixed, fixed + V_FIXED_COUNT);
 
     // append the named temp variables
@@ -381,6 +415,13 @@ void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContex
     ctx.width  = rod.x2 - rod.x1;
     ctx.height = rod.y2 - rod.y1;
     ctx.frame  = args.time;
+
+    // user-constant knobs (k1..k4, ref colour, mix, clamp)
+    _k1->getValueAtTime(args.time, ctx.k[0]); _k2->getValueAtTime(args.time, ctx.k[1]);
+    _k3->getValueAtTime(args.time, ctx.k[2]); _k4->getValueAtTime(args.time, ctx.k[3]);
+    _ref->getValueAtTime(args.time, ctx.ref[0], ctx.ref[1], ctx.ref[2]);
+    _mix->getValueAtTime(args.time, ctx.mixAmt);
+    _clamp->getValueAtTime(args.time, ctx.clampOut);
 }
 
 template <class PIX, int nComps, int maxValue, bool HALF>
@@ -440,13 +481,18 @@ bool ExpressionPlugin::renderMetal(const OFX::RenderArguments& args, const ExprC
         hasSrc = (sd.buffer != 0) ? 1 : 0;
     }
 
+    expreval::ExprKnobs knobs;
+    for (int i = 0; i < 4; ++i) knobs.k[i] = (float)ctx.k[i];
+    for (int i = 0; i < 3; ++i) knobs.ref[i] = (float)ctx.ref[i];
+    knobs.mix = (float)ctx.mixAmt; knobs.clampOut = ctx.clampOut ? 1 : 0;
+
     std::string err;
     bool ok = expreval::metalRender(
         args.pMetalCmdQ, sd, hasSrc, dd,
         args.renderWindow.x1, args.renderWindow.y1,
         args.renderWindow.x2, args.renderWindow.y2,
         nComps, (float)ctx.width, (float)ctx.height, (float)ctx.frame,
-        msl, err);
+        knobs, msl, err);
     if (!ok) { try { setPersistentMessage(OFX::Message::eMessageError, "",
                        "Metal render failed (CPU fallback): " + err); } catch (...) {} }
     return ok;
@@ -495,13 +541,18 @@ bool ExpressionPlugin::renderCuda(const OFX::RenderArguments& args, const ExprCo
         hasSrc = (sd.buffer != 0) ? 1 : 0;
     }
 
+    expreval::ExprKnobs knobs;
+    for (int i = 0; i < 4; ++i) knobs.k[i] = (float)ctx.k[i];
+    for (int i = 0; i < 3; ++i) knobs.ref[i] = (float)ctx.ref[i];
+    knobs.mix = (float)ctx.mixAmt; knobs.clampOut = ctx.clampOut ? 1 : 0;
+
     std::string err;
     bool ok = expreval::cudaRender(
         args.pCudaStream, sd, hasSrc, dd,
         args.renderWindow.x1, args.renderWindow.y1,
         args.renderWindow.x2, args.renderWindow.y2,
         nComps, (float)ctx.width, (float)ctx.height, (float)ctx.frame,
-        cu, err);
+        knobs, cu, err);
     if (!ok) { try { setPersistentMessage(OFX::Message::eMessageError, "",
                        "CUDA render failed (CPU fallback): " + err); } catch (...) {} }
     return ok;
@@ -665,6 +716,47 @@ void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc
         page->addChild(*pn);
         defineExprParam(desc, page, e, le, "");
     }
+
+    // ---- user-constant knobs (mirror the Matchbox: k1..k4, ref, mix, clamp) ----
+    // Animatable scalars you can reference inside any expression as k1..k4; k1
+    // defaults to 1 (a handy "amount"), the rest to 0.
+    for (int i = 0; i < 4; ++i) {
+        char n[8], l[8];
+        std::sprintf(n, "k%d", i + 1);
+        std::sprintf(l, "k%d", i + 1);
+        OFX::DoubleParamDescriptor* p = desc.defineDoubleParam(n);
+        p->setLabel(l);
+        p->setDefault(i == 0 ? 1.0 : 0.0);
+        p->setRange(-1e6, 1e6);
+        p->setDisplayRange(-1.0, 1.0);
+        p->setIncrement(0.001);
+        p->setHint("Generic animatable scalar; reference it as k1..k4 in your expressions.");
+        p->setAnimates(true);
+        page->addChild(*p);
+    }
+    OFX::RGBParamDescriptor* ref = desc.defineRGBParam("ref");
+    ref->setLabel("Reference Colour");
+    ref->setDefault(0.0, 0.0, 0.0);
+    ref->setHint("Reference colour; reference it as ref.r ref.g ref.b in your expressions.");
+    ref->setAnimates(true);
+    page->addChild(*ref);
+
+    OFX::DoubleParamDescriptor* mix = desc.defineDoubleParam("mix");
+    mix->setLabel("Mix");
+    mix->setDefault(1.0);
+    mix->setRange(0.0, 1.0);
+    mix->setDisplayRange(0.0, 1.0);
+    mix->setIncrement(0.001);
+    mix->setHint("Blend between the original image (0) and the expression result (1).");
+    mix->setAnimates(true);
+    page->addChild(*mix);
+
+    OFX::BooleanParamDescriptor* clampOut = desc.defineBooleanParam("clampOutput");
+    clampOut->setLabel("Clamp Output");
+    clampOut->setDefault(false);
+    clampOut->setHint("Clamp the result to the 0..1 range (like Nuke's clamp(x)).");
+    clampOut->setAnimates(true);
+    page->addChild(*clampOut);
 }
 
 OFX::ImageEffect* ExpressionPluginFactory::createInstance(OfxImageEffectHandle handle, OFX::ContextEnum /*context*/)

@@ -28,6 +28,8 @@ struct Uniforms {
     int   dstX1, dstY1, dstRowFloats;
     int   nComps, hasSrc;
     float fwidth, fheight, frame;
+    float k1, k2, k3, k4, refr, refg, refb, mix;
+    int   clampOut;
 };
 
 // MSL-source -> compiled pipeline cache. Pipelines are retained (non-ARC) and
@@ -81,6 +83,7 @@ bool metalRender(void* commandQueue,
                  const MetalImageDesc& dst,
                  int rwX1, int rwY1, int rwX2, int rwY2,
                  int nComps, float width, float height, float frame,
+                 const ExprKnobs& knobs,
                  const std::string& mslSource,
                  std::string& err) {
     if (!commandQueue || !dst.buffer) { err = "no command queue / dst buffer"; return false; }
@@ -102,6 +105,9 @@ bool metalRender(void* commandQueue,
         u.dstX1 = dst.x1; u.dstY1 = dst.y1; u.dstRowFloats = dst.rowFloats;
         u.nComps = nComps; u.hasSrc = (hasSrc && src.buffer) ? 1 : 0;
         u.fwidth = width; u.fheight = height; u.frame = frame;
+        u.k1 = knobs.k[0]; u.k2 = knobs.k[1]; u.k3 = knobs.k[2]; u.k4 = knobs.k[3];
+        u.refr = knobs.ref[0]; u.refg = knobs.ref[1]; u.refb = knobs.ref[2];
+        u.mix = knobs.mix; u.clampOut = knobs.clampOut;
 
         id<MTLCommandBuffer> cb = [q commandBuffer];
         id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];

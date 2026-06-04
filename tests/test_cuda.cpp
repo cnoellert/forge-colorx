@@ -101,18 +101,23 @@ int main() {
     std::printf("scalar kernels (%zu expressions):\n", exprs.size());
     if (!nvrtcCheck("gen_* battery", buildCudaScalarKernels(bodies, NVARS))) ++fails;
 
-    // 2) a representative per-pixel kernel (channels + a temp slot)
+    // 2) a representative per-pixel kernel (channels + knobs + a temp slot).
+    //    pnames must match Expression.cpp's fixed slots: 11 predefined + k1..k4 +
+    //    ref.r/.g/.b (slots 11..17), then the temp at slot 18.
     {
-        std::vector<std::string> pnames = names; pnames.push_back("lum");
+        std::vector<std::string> pnames = names;
+        const char* knob[7] = { "k1","k2","k3","k4","ref.r","ref.g","ref.b" };
+        for (int i = 0; i < 7; ++i) pnames.push_back(knob[i]);
+        pnames.push_back("lum");
         Program chan[4], temp; std::string err;
-        const char* ex[4] = { "lum", "smoothstep(0,1,r)", "min(r,g,b)", "a" };
+        const char* ex[4] = { "lum*k1", "smoothstep(0,1,r)", "min(b,ref.r)", "a" };
         for (int k = 0; k < 4; ++k) chan[k].compile(ex[k], pnames, err);
         temp.compile("0.2126*r+0.7152*g+0.0722*b", pnames, err);
         std::string cbody[4] = { chan[0].emitC(), chan[1].emitC(), chan[2].emitC(), chan[3].emitC() };
         std::vector<std::pair<int,std::string> > temps;
-        temps.push_back(std::make_pair(11, temp.emitC()));
-        std::printf("pixel kernel (4 channels + 1 temp):\n");
-        if (!nvrtcCheck("exprKernel", buildCudaPixelKernel(cbody, temps, 12))) ++fails;
+        temps.push_back(std::make_pair(18, temp.emitC()));
+        std::printf("pixel kernel (4 channels + knobs + 1 temp):\n");
+        if (!nvrtcCheck("exprKernel", buildCudaPixelKernel(cbody, temps, 19))) ++fails;
     }
 
     std::printf(fails ? "\nFAIL\n" : "\nALL PASS (CUDA kernels compile to PTX via NVRTC)\n");

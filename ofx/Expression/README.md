@@ -69,7 +69,15 @@ top to bottom, before the channel fields), exactly like Nuke's temporaries.
 | `width height`   | Image size (region of definition)                         |
 | `frame`          | Current frame (render time)                               |
 | `pi e`           | Constants (also callable as `pi()` `e()`)                 |
+| `k1 k2 k3 k4`    | Animatable scalar knobs (`k1` defaults to 1, rest 0)      |
+| `ref.r ref.g ref.b` | The Reference Colour knob (RGB), default `0`            |
 | *your temps*     | Whatever you name in the temp rows                        |
+
+The `k1..k4` and `ref` knobs (and the **Mix** / **Clamp Output** controls below)
+mirror the companion Matchbox build, so the OFX is now a superset: type any
+expression *and* drive it live with keyframable constants. **Mix** blends the
+original image (0) with the expression result (1); **Clamp Output** clamps the
+result to `0..1` (applied before Mix, matching the Matchbox).
 
 For byte/short clips the channels are normalised to 0..1 on the way in and
 written back at the clip's bit depth (clamped). Float clips pass through

@@ -390,12 +390,25 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
    random() parity gap.
 4. ✅ Linux pixel-verification of the OFX in Linux Flame 2026.2.1 (`flame-01`) —
    loads + renders. Remaining: Linux Resolve load + a pixel-level EXR check.
-5. Open: load/verify the **Matchbox node in Flame** (GPU compile — `shader_builder`
-   accepts it but it hasn't run as a node); user-constant params (`k1..k4`/`ref`) in
-   the OFX UI; universal macOS build; tag **v1.0**.
+5. ✅ **OFX user-constant params.** `k1..k4` (animatable scalars), `ref` colour
+   (`ref.r/.g/.b`), `Mix`, `Clamp Output` — bound as expression variables / output
+   knobs across CPU/Metal/CUDA, mirroring the Matchbox so the OFX is a superset
+   (typed expressions + live keyframable constants). Verified on all three back-ends.
+6. Open: load/verify the **Matchbox node in Flame** (GPU compile — `shader_builder`
+   accepts it but it can't be driven like the OFX, so deprioritised); universal
+   macOS build; tag **v1.0**.
 
 ## Session history (newest first)
 
+- OFX user-constant knobs: added `k1..k4` (animatable scalars), `ref` colour
+  (`ref.r/.g/.b`), `Mix`, `Clamp Output` to the OFX, bound as expression variables
+  (slots 11..17, before temps) + output post-ops, mirroring the Matchbox so the OFX
+  is a superset. Wired through CPU (ExpressionProcessor), Metal + CUDA (uniforms +
+  pixel-kernel binding + clamp/mix), via an ExprKnobs POD in the bridges. Verified:
+  CPU eval/transpile, Metal pixel-path (knob case + clamp + mix, 7e-8), CUDA
+  pixel-path (2.98e-8) + nvrtc compile-check. Decision: the Matchbox can't be driven
+  at runtime (compiled formulae), so we enrich the OFX instead of chasing Matchbox
+  node verification.
 - Real Perlin (all builds): replaced value-noise + `sinf` random with classic Perlin
   (Ashima `cnoise`, tableless permutation) + a tableless permute `random()` across
   CPU eval, CPU transpile, CUDA, Metal, and the Matchbox GLSL. Parity verified:

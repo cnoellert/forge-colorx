@@ -37,6 +37,8 @@ struct ExprCudaUniforms {
     int dstX1, dstY1, dstRowFloats;
     int nComps, hasSrc;
     float fwidth, fheight, frame;
+    float k1, k2, k3, k4, refr, refg, refb, mix;
+    int clampOut;
 };
 
 // Module cache keyed by CUDA source. Modules belong to the context they were
@@ -114,6 +116,7 @@ bool cudaRender(void* stream,
                 const CudaImageDesc& dst,
                 int rwX1, int rwY1, int rwX2, int rwY2,
                 int nComps, float width, float height, float frame,
+                const ExprKnobs& knobs,
                 const std::string& cudaSource,
                 std::string& err) {
     // The host has already initialised CUDA and made its context current on this
@@ -133,6 +136,9 @@ bool cudaRender(void* stream,
     U.dstX1 = dst.x1; U.dstY1 = dst.y1; U.dstRowFloats = dst.rowFloats;
     U.nComps = nComps; U.hasSrc = hasSrc;
     U.fwidth = width; U.fheight = height; U.frame = frame;
+    U.k1 = knobs.k[0]; U.k2 = knobs.k[1]; U.k3 = knobs.k[2]; U.k4 = knobs.k[3];
+    U.refr = knobs.ref[0]; U.refg = knobs.ref[1]; U.refb = knobs.ref[2];
+    U.mix = knobs.mix; U.clampOut = knobs.clampOut;
 
     CUdeviceptr dSrc = (CUdeviceptr)(uintptr_t)src.buffer;
     CUdeviceptr dDst = (CUdeviceptr)(uintptr_t)dst.buffer;

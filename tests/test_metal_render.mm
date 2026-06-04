@@ -31,23 +31,26 @@
 
 using namespace expreval;
 
-// Variable slots — must match Expression.cpp's enum order.
-enum { R=0, G, B, A, X, Y, CX, CY, WIDTH, HEIGHT, FRAME, FIXED };
+// Variable slots — must match Expression.cpp's enum order (incl. the k1..k4 /
+// ref.r/.g/.b user-constant knobs, which the pixel kernel binds into v[11..17]).
+enum { R=0, G, B, A, X, Y, CX, CY, WIDTH, HEIGHT, FRAME,
+       K1, K2, K3, K4, REFR, REFG, REFB, FIXED };
 
 int main(int argc, char** argv) {
     // --emit F: write a representative production pixel kernel and exit (no GPU),
     // so CI can offline-compile it with `xcrun metal`.
     if (argc >= 3 && std::string(argv[1]) == "--emit") {
         std::vector<std::string> names =
-            { "r","g","b","a","x","y","cx","cy","width","height","frame", "lum" };
+            { "r","g","b","a","x","y","cx","cy","width","height","frame",
+              "k1","k2","k3","k4","ref.r","ref.g","ref.b", "lum" };
         Program chan[4], temp; std::string err;
-        const char* ex[4] = { "lum", "smoothstep(0,1,r)", "min(r,g,b)", "a" };
+        const char* ex[4] = { "lum*k1", "smoothstep(0,1,r)", "min(r,g,b)", "a" };
         for (int k = 0; k < 4; ++k) chan[k].compile(ex[k], names, err);
         temp.compile("0.2126*r+0.7152*g+0.0722*b", names, err);
         std::string cbody[4] = { chan[0].emitC(), chan[1].emitC(), chan[2].emitC(), chan[3].emitC() };
         std::vector<std::pair<int,std::string> > temps;
-        temps.push_back(std::make_pair(11, temp.emitC()));
-        std::string msl = buildMetalPixelKernel(cbody, temps, 12);
+        temps.push_back(std::make_pair(18, temp.emitC()));
+        std::string msl = buildMetalPixelKernel(cbody, temps, 19);
         FILE* f = std::fopen(argv[2], "w");
         if (!f) { std::printf("cannot open %s\n", argv[2]); return 1; }
         std::fwrite(msl.data(), 1, msl.size(), f); std::fclose(f);
@@ -63,10 +66,17 @@ int main(int argc, char** argv) {
         const int W = 64, H = 48, nComps = 4;
         const float frame = 7.0f;
 
-        // fixed predefined variable names + one temp ("lum")
+        // fixed predefined variable names (incl. knobs) + one temp ("lum")
         std::vector<std::string> names =
-            { "r","g","b","a","x","y","cx","cy","width","height","frame", "lum" };
-        const int LUM = 11, nVars = 12;
+            { "r","g","b","a","x","y","cx","cy","width","height","frame",
+              "k1","k2","k3","k4","ref.r","ref.g","ref.b", "lum" };
+        const int LUM = 18, nVars = 19;
+
+        // non-identity knobs so the k/ref binding + clamp + mix are actually exercised
+        ExprKnobs knobs;
+        knobs.k[0]=2.0f; knobs.k[1]=0.25f; knobs.k[2]=-0.5f; knobs.k[3]=0.1f;
+        knobs.ref[0]=0.1f; knobs.ref[1]=0.2f; knobs.ref[2]=0.3f;
+        knobs.mix=0.7f; knobs.clampOut=1;
 
         // source pattern (RGBA float), bounds origin (0,0)
         std::vector<float> srcPix((size_t)W*H*nComps);
@@ -88,6 +98,7 @@ int main(int argc, char** argv) {
             { "x/width", "y/height", "0", "1", "" },                  // x,y / size
             { "1-r", "r*g+b", "min(r,g,b)", "1", "" },                // mixed math
             { "lum", "lum", "lum", "1", "0.2126*r+0.7152*g+0.0722*b"},// temp -> grey
+            { "r*k1", "g+ref.r", "min(b,k2)", "a", "" },              // knobs: k1,k2,ref.r
         };
 
         id<MTLBuffer> sbuf = [dev newBufferWithBytes:srcPix.data()
@@ -120,7 +131,7 @@ int main(int argc, char** argv) {
             sd.buffer = (void*)sbuf; sd.x1 = 0; sd.y1 = 0; sd.rowFloats = W*nComps;
             dd.buffer = (void*)dbuf; dd.x1 = 0; dd.y1 = 0; dd.rowFloats = W*nComps;
             if (!metalRender((void*)q, sd, /*hasSrc*/1, dd,
-                             /*rw*/0, 0, W, H, nComps, (float)W, (float)H, frame, msl, err)) {
+                             /*rw*/0, 0, W, H, nComps, (float)W, (float)H, frame, knobs, msl, err)) {
                 std::printf("metalRender failed [case %zu]: %s\n", ci, err.c_str());
                 return 1;
             }
@@ -137,9 +148,15 @@ int main(int argc, char** argv) {
                     v[X]=x; v[Y]=y;
                     v[CX]=(x-halfW)*invHalfW; v[CY]=(y-halfH)*invHalfW;
                     v[WIDTH]=W; v[HEIGHT]=H; v[FRAME]=frame;
+                    v[K1]=knobs.k[0]; v[K2]=knobs.k[1]; v[K3]=knobs.k[2]; v[K4]=knobs.k[3];
+                    v[REFR]=knobs.ref[0]; v[REFG]=knobs.ref[1]; v[REFB]=knobs.ref[2];
                     if (hasTemp) v[LUM] = temp.eval(&v[0]);
                     double want[4] = { chan[0].eval(&v[0]), chan[1].eval(&v[0]),
                                        chan[2].eval(&v[0]), chan[3].eval(&v[0]) };
+                    // mirror the kernel's output knobs: clamp then mix vs the original
+                    if (knobs.clampOut) for (int c=0;c<4;++c) want[c] = want[c]<0?0:(want[c]>1?1:want[c]);
+                    if (knobs.mix != 1.0f) { double o[4]={sp[0],sp[1],sp[2],sp[3]};
+                        for (int c=0;c<4;++c) want[c] = o[c] + (want[c]-o[c])*knobs.mix; }
                     const float* gp = &gpu[((size_t)y*W + x)*nComps];
                     for (int k = 0; k < 4; ++k) {
                         double e = std::fabs(want[k] - (double)gp[k]);

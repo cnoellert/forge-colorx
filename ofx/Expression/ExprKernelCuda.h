@@ -164,6 +164,8 @@ inline std::string buildCudaPixelKernel(const std::string chan[4],
 "    int dstX1, dstY1, dstRowFloats;\n"
 "    int nComps, hasSrc;\n"
 "    float fwidth, fheight, frame;\n"
+"    float k1, k2, k3, k4, refr, refg, refb, mix;\n"
+"    int clampOut;\n"
 "};\n"
 "\n"
 "extern \"C\" __global__ void exprKernel(const float* src, float* dst, ExprCudaUniforms U) {\n"
@@ -183,7 +185,9 @@ inline std::string buildCudaPixelKernel(const std::string chan[4],
 "    double invHalfW = (halfW != 0.0) ? 1.0 / halfW : 0.0;\n"
 "    v[6] = ((double)gx - halfW) * invHalfW;\n"
 "    v[7] = ((double)gy - halfH) * invHalfW;\n"
-"    v[8] = U.fwidth; v[9] = U.fheight; v[10] = U.frame;\n";
+"    v[8] = U.fwidth; v[9] = U.fheight; v[10] = U.frame;\n"
+"    v[11] = (double)U.k1; v[12] = (double)U.k2; v[13] = (double)U.k3; v[14] = (double)U.k4;\n"
+"    v[15] = (double)U.refr; v[16] = (double)U.refg; v[17] = (double)U.refb;\n";
     for (size_t t = 0; t < temps.size(); ++t)
         s += "    v[" + std::to_string(temps[t].first) + "] = (" + temps[t].second + ");\n";
     s +=
@@ -191,6 +195,8 @@ inline std::string buildCudaPixelKernel(const std::string chan[4],
 "    double o1 = (" + chan[1] + ");\n"
 "    double o2 = (" + chan[2] + ");\n"
 "    double o3 = (" + chan[3] + ");\n"
+"    if (U.clampOut != 0) { o0=o0<0.0?0.0:(o0>1.0?1.0:o0); o1=o1<0.0?0.0:(o1>1.0?1.0:o1); o2=o2<0.0?0.0:(o2>1.0?1.0:o2); o3=o3<0.0?0.0:(o3>1.0?1.0:o3); }\n"
+"    if (U.mix != 1.0f) { double m=(double)U.mix; o0=r+(o0-r)*m; o1=g+(o1-g)*m; o2=b+(o2-b)*m; o3=a+(o3-a)*m; }\n"
 "    int di = (gy - U.dstY1) * U.dstRowFloats + (gx - U.dstX1) * U.nComps;\n"
 "    if (U.nComps == 1) { dst[di] = (float)o3; }\n"
 "    else { dst[di] = (float)o0; dst[di+1] = (float)o1; dst[di+2] = (float)o2; if (U.nComps == 4) dst[di+3] = (float)o3; }\n"
