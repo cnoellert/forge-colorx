@@ -23,6 +23,7 @@
 #include <vector>
 #include <cmath>
 #include <cstdlib>
+#include <cstdio>
 
 namespace expreval {
 
@@ -97,6 +98,14 @@ public:
     // Evaluate. `vars` must have varNames.size() entries.
     double eval(const double* vars) const { return root_ < 0 ? 0.0 : evalNode(root_, vars); }
 
+    // Transpile the compiled AST to a C-like expression string over a variable
+    // array `v[]`, calling the exh_* helpers from ExprKernel.h. The same string
+    // is valid as a CUDA / Metal / GLSL kernel body given the matching prelude;
+    // tests/test_transpile.cpp differential-checks it against eval(). The grammar
+    // emitted is a portable float-math subset (no doubles assumed): every literal
+    // and helper is type-agnostic, so the prelude's FLT typedef picks the width.
+    std::string emitC() const { std::string o; if (root_ < 0) o = "0.0"; else emitNode(root_, o); return o; }
+
     bool ok() const { return ok_; }
 
 private:
@@ -123,6 +132,7 @@ private:
     int varIndex(const std::string& name) const;
 
     double evalNode(int idx, const double* vars) const;
+    void   emitNode(int idx, std::string& o) const;
 
     static int  binPrec(BinOp op);
     static bool rightAssoc(BinOp op) { return op == B_POW; }
@@ -442,6 +452,110 @@ inline double Program::evalNode(int idx, const double* vars) const {
         }
     }
     return 0.0;
+}
+
+// ---- transpiler: AST -> C-like kernel body over v[] (see ExprKernel.h) -------
+inline void Program::emitNode(int idx, std::string& o) const {
+    const Node& n = nodes_[idx];
+    switch (n.kind) {
+        case N_NUM: {
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), "%.17g", n.num);
+            std::string s(buf);
+            // make it an unambiguous floating literal ("3" -> "3.0")
+            if (s.find_first_of(".eEnN") == std::string::npos) s += ".0";
+            o += "(" + s + ")";
+            return;
+        }
+        case N_VAR:
+            o += "v[" + std::to_string(n.var) + "]";
+            return;
+        case N_UNARY:
+            if (n.op == '-') { o += "(-("; emitNode(n.a, o); o += "))"; }
+            else             { o += "(("; emitNode(n.a, o); o += ")==0.0?1.0:0.0)"; } // '!'
+            return;
+        case N_TERNARY:
+            o += "(("; emitNode(n.a, o); o += ")!=0.0?(";
+            emitNode(n.b, o); o += "):("; emitNode(n.c, o); o += "))";
+            return;
+        case N_BINARY: {
+            const char* cmp = nullptr;
+            switch (n.op) {
+                case B_ADD: o += "("; emitNode(n.a,o); o += "+"; emitNode(n.b,o); o += ")"; return;
+                case B_SUB: o += "("; emitNode(n.a,o); o += "-"; emitNode(n.b,o); o += ")"; return;
+                case B_MUL: o += "("; emitNode(n.a,o); o += "*"; emitNode(n.b,o); o += ")"; return;
+                case B_DIV: o += "("; emitNode(n.a,o); o += "/"; emitNode(n.b,o); o += ")"; return;
+                case B_MOD: o += "fmod("; emitNode(n.a,o); o += ","; emitNode(n.b,o); o += ")"; return;
+                case B_POW: o += "pow(";  emitNode(n.a,o); o += ","; emitNode(n.b,o); o += ")"; return;
+                case B_LT: cmp = "<";  break; case B_LE: cmp = "<="; break;
+                case B_GT: cmp = ">";  break; case B_GE: cmp = ">="; break;
+                case B_EQ: cmp = "=="; break; case B_NE: cmp = "!="; break;
+                case B_AND:
+                    o += "((("; emitNode(n.a,o); o += ")!=0.0)&&(("; emitNode(n.b,o); o += ")!=0.0)?1.0:0.0)"; return;
+                case B_OR:
+                    o += "((("; emitNode(n.a,o); o += ")!=0.0)||(("; emitNode(n.b,o); o += ")!=0.0)?1.0:0.0)"; return;
+            }
+            o += "(("; emitNode(n.a,o); o += ")"; o += cmp; o += "("; emitNode(n.b,o); o += ")?1.0:0.0)";
+            return;
+        }
+        case N_CALL: {
+            // emit a plain call `fn(arg0,arg1,...)`
+            auto call = [&](const char* fn) {
+                o += fn; o += "(";
+                for (size_t i = 0; i < n.args.size(); ++i) { if (i) o += ","; emitNode(n.args[i], o); }
+                o += ")";
+            };
+            // emit `fn(arg0,arg1,arg2)` padding missing args with 0.0 (noise/random)
+            auto call3 = [&](const char* fn) {
+                o += fn; o += "(";
+                for (int i = 0; i < 3; ++i) {
+                    if (i) o += ",";
+                    if (i < (int)n.args.size()) emitNode(n.args[i], o); else o += "0.0";
+                }
+                o += ")";
+            };
+            switch (n.fid) {
+                case F_SIN: call("sin"); return;   case F_COS: call("cos"); return;
+                case F_TAN: call("tan"); return;   case F_ASIN: call("asin"); return;
+                case F_ACOS: call("acos"); return; case F_ATAN: call("atan"); return;
+                case F_SINH: call("sinh"); return; case F_COSH: call("cosh"); return;
+                case F_TANH: call("tanh"); return; case F_EXP: call("exp"); return;
+                case F_LOG: call("log"); return;   case F_LOG10: call("log10"); return;
+                case F_LOG2: call("exh_log2"); return; case F_SQRT: call("sqrt"); return;
+                case F_ABS: call("fabs"); return;  case F_FLOOR: call("floor"); return;
+                case F_CEIL: call("ceil"); return; case F_TRUNC: call("exh_trunc"); return;
+                case F_RINT: call("exh_round"); return; case F_ROUND: call("exh_round"); return;
+                case F_SIGN: call("exh_sign"); return;
+                case F_RADIANS: o += "(("; emitNode(n.args[0],o); o += ")*0.017453292519943295)"; return;
+                case F_DEGREES: o += "(("; emitNode(n.args[0],o); o += ")*57.29577951308232)"; return;
+                case F_EXPONENT: call("exh_exponent"); return; case F_MANTISSA: call("exh_mantissa"); return;
+                case F_POW2: call("exh_pow2"); return;
+                case F_POW: call("pow"); return;   case F_ATAN2: call("atan2"); return;
+                case F_FMOD: call("fmod"); return; case F_HYPOT: call("hypot"); return;
+                case F_STEP: call("exh_step"); return; case F_LDEXP: call("exh_ldexp"); return;
+                case F_MIN: case F_MAX: {
+                    const char* fn = (n.fid == F_MIN) ? "fmin" : "fmax";
+                    int k = (int)n.args.size();
+                    for (int i = 0; i < k - 1; ++i) { o += fn; o += "("; emitNode(n.args[i], o); o += ","; }
+                    emitNode(n.args[k - 1], o);
+                    for (int i = 0; i < k - 1; ++i) o += ")";
+                    return;
+                }
+                case F_CLAMP1: call("exh_clamp1"); return; case F_CLAMP3: call("exh_clamp3"); return;
+                case F_LERP: call("exh_lerp"); return; case F_SMOOTHSTEP: call("exh_smoothstep"); return;
+                case F_NOISE1: case F_NOISE2: case F_NOISE3: call3("exh_noise"); return;
+                case F_RANDOM1: case F_RANDOM2: case F_RANDOM3: call3("exh_random"); return;
+                case F_FBM: call("exh_fbm"); return; case F_TURB: call("exh_turb"); return;
+                case F_FROM_SRGB: call("exh_from_srgb"); return; case F_TO_SRGB: call("exh_to_srgb"); return;
+                case F_FROM_REC709: call("exh_from_rec709"); return; case F_TO_REC709: call("exh_to_rec709"); return;
+                case F_FROM_BYTE: call("exh_from_byte"); return; case F_TO_BYTE: call("exh_to_byte"); return;
+                case F_PI: o += "(3.141592653589793)"; return; case F_E: o += "(2.718281828459045)"; return;
+            }
+            o += "0.0";
+            return;
+        }
+    }
+    o += "0.0";
 }
 
 } // namespace expreval
