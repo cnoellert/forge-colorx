@@ -400,6 +400,11 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Session history (newest first)
 
+- Presets gallery: added `PRESETS.md` (repo root) — 20 validated, copy-paste presets
+  for the OFX Expression node (UV pass, IQ cosine-palette rainbow/colorized-noise,
+  checkerboard/stripes/rings/flower, plasma, Perlin clouds/marble, film grain, gamma/
+  saturation/duotone/posterize/vignette/scanlines) with suggested k-knob values. All
+  compile-checked against the parser. Linked from both READMEs.
 - OFX params reorg: split the UI into four labelled pages (Channels / Variables /
   Constants / Output) and made the k-knobs **nameable** — an optional `kN name`
   alias per knob (name `k1` "gamma" → `gamma` resolves to the k1 slider). Kept BOTH

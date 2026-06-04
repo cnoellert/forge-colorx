@@ -32,7 +32,9 @@ The **OFX** build is the faithful clone (Matchbox has no text widget, so a true
 The **Matchbox** build is for when you want GPU speed and a fixed expression.
 
 See each subfolder's `README.md` for build, install, the full Nuke→here
-function-parity table, and worked examples.
+function-parity table, and worked examples. For a copy-paste gallery of effects
+(UV pass, rainbow/cosine palettes, checkerboard, plasma, Perlin clouds/marble,
+duotone, posterize, film grain, scanlines, …) see [`PRESETS.md`](PRESETS.md).
 
 ## Status
 

@@ -142,8 +142,13 @@ Notes / deliberate parity choices:
 | Radial vignette | `r*clamp(1-hypot(cx,cy))` | `g*clamp(1-hypot(cx,cy))` | `b*clamp(1-hypot(cx,cy))` | `a` |
 | Threshold matte | `r` | `g` | `b` | `r>0.5?1:0` |
 
-Vignette tidied with a temp — set `temp name 0 = v`,
-`temp expr 0 = clamp(1 - hypot(cx,cy))`, then `r = r*v`, `g = g*v`, `b = b*v`.
+Vignette tidied with a variable — in the Variables box put `v = clamp(1 - hypot(cx,cy))`,
+then `r = r*v`, `g = g*v`, `b = b*v`.
+
+**More presets:** see [`PRESETS.md`](../../PRESETS.md) at the repo root — a validated,
+copy-paste gallery (UV pass, rainbow/cosine palettes, checkerboard, plasma, Perlin
+clouds/marble, duotone, posterize, film grain, scanlines, …) with suggested knob
+values.
 
 ## Performance
 
