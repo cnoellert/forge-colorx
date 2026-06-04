@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Expression engine unit tests
+        run: |
+          g++ -std=c++11 -O2 -I ofx/Expression tests/test_expr.cpp -o test_expr
+          ./test_expr
+
+      - name: Compile + link OFX plugin against the OpenFX SDK
+        run: |
+          git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx
+          INC="-I openfx/include -I openfx/Support/include -I ofx/Expression"
+          g++ -std=c++11 -fPIC -c $INC openfx/Support/Library/*.cpp
+          g++ -std=c++11 -fPIC -c $INC ofx/Expression/Expression.cpp -o Expression.o
+          g++ -shared -fPIC -o Expression.ofx Expression.o ofxs*.o
+          test -f Expression.ofx && echo "OFX plugin linked OK"
