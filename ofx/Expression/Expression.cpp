@@ -305,11 +305,7 @@ public:
     {
         _dstClip = fetchClip(kOfxImageEffectOutputClipName);
         _srcClip = fetchClip(kOfxImageEffectSimpleSourceClipName);
-        _exprR = fetchStringParam("exprR");
-        _exprG = fetchStringParam("exprG");
-        _exprB = fetchStringParam("exprB");
-        _exprA = fetchStringParam("exprA");
-        _vars  = fetchStringParam("vars");
+        _script = fetchStringParam("script");
         _k1 = fetchDoubleParam("k1"); _k2 = fetchDoubleParam("k2");
         _k3 = fetchDoubleParam("k3"); _k4 = fetchDoubleParam("k4");
         _ref = fetchRGBParam("ref");
@@ -338,9 +334,7 @@ private:
 
     OFX::Clip*        _dstClip;
     OFX::Clip*        _srcClip;
-    OFX::StringParam* _exprR; OFX::StringParam* _exprG;
-    OFX::StringParam* _exprB; OFX::StringParam* _exprA;
-    OFX::StringParam* _vars;              // multi-line "name = expression" block
+    OFX::StringParam* _script;           // the whole expression: r/g/b/a + variables
     OFX::DoubleParam* _k1; OFX::DoubleParam* _k2;
     OFX::DoubleParam* _k3; OFX::DoubleParam* _k4;
     OFX::RGBParam*    _ref;
@@ -371,6 +365,17 @@ static bool validIdent(const std::string& s)
     return true;
 }
 
+// A built-in input/constant the user must not redefine as a variable (r/g/b/a are
+// handled separately as channel-assignment targets, so they're not listed here).
+static bool isBuiltinName(const std::string& s)
+{
+    static const char* k[] = { "x","y","cx","cy","width","height","frame",
+                               "k1","k2","k3","k4","t","pi","e" };
+    for (size_t i = 0; i < sizeof(k)/sizeof(k[0]); ++i)
+        if (s == k[i]) return true;
+    return false;
+}
+
 void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContext& ctx)
 {
     // fixed predefined variable names, in slot order (must match the V_* enum)
@@ -379,70 +384,63 @@ void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContex
           "k1","k2","k3","k4","ref.r","ref.g","ref.b" };
     ctx.names.assign(fixed, fixed + V_FIXED_COUNT);
 
-    // Build the derived bindings from the multi-line Variables block — one
-    // "name = expression" per line, evaluated in order before the channels so a
-    // later line can use an earlier one (and any line can use k1..k4 / ref.r..).
-    // This is both kinds of named token in one field: `gamma = k1` is a named
-    // constant driven by the slider; `lum = 0.2126*r+...` is a derived variable.
-    // Blank lines and lines starting with '#' are ignored. (names_ stores the
-    // address of the ctx.names vector object, stable across push_backs, so
-    // compiling against the growing list is safe.)
+    // Parse the single Expression script: one "name = expression" per line, top to
+    // bottom. A line whose name is r/g/b/a sets that output channel; any other name
+    // declares a variable usable below (e.g. `lum = 0.2126*r+...`, `gamma = k1`).
+    // Variables eval in order (a variable may use earlier variables, the inputs, and
+    // k1..k4); the four channels eval last, each independently against the same
+    // state (so `r = g` / `g = r` swaps correctly). Blank lines and '#' comments are
+    // ignored. (names_ holds &ctx.names, stable across push_backs, so compiling
+    // against the growing list is safe.)
     ctx.derived.clear();
     ctx.derivedSlot.clear();
     std::string err;
 
-    std::string varsSrc;
-    _vars->getValueAtTime(args.time, varsSrc);
+    std::string chanStr[4] = { "r", "g", "b", "a" };   // unassigned -> passthrough
+    std::string script;
+    _script->getValueAtTime(args.time, script);
+    auto fail = [&](const std::string& msg) {
+        try { setPersistentMessage(OFX::Message::eMessageError, "", msg); } catch (...) {}
+        OFX::throwSuiteStatusException(kOfxStatFailed);
+    };
     size_t pos = 0; int lineNo = 0;
-    while (pos < varsSrc.size()) {
-        size_t eol = varsSrc.find('\n', pos);
-        std::string line = varsSrc.substr(pos, (eol == std::string::npos) ? std::string::npos : eol - pos);
-        pos = (eol == std::string::npos) ? varsSrc.size() : eol + 1;
+    while (pos < script.size()) {
+        size_t eol = script.find('\n', pos);
+        std::string line = script.substr(pos, (eol == std::string::npos) ? std::string::npos : eol - pos);
+        pos = (eol == std::string::npos) ? script.size() : eol + 1;
         ++lineNo;
         line = trimws(line);
         if (line.empty() || line[0] == '#') continue;
 
         char ln[16]; std::sprintf(ln, "%d", lineNo);
-        size_t eq = line.find('=');
-        if (eq == std::string::npos) {
-            try { setPersistentMessage(OFX::Message::eMessageError, "",
-                std::string("Variables line ") + ln + ": expected 'name = expression'"); } catch (...) {}
-            OFX::throwSuiteStatusException(kOfxStatFailed);
-        }
+        size_t eq = line.find('=');   // the assignment '='; any ==,<=,!= sit on the RHS
+        if (eq == std::string::npos)
+            fail(std::string("line ") + ln + ": expected 'name = expression'");
         std::string name = trimws(line.substr(0, eq));
         std::string expr = trimws(line.substr(eq + 1));
-        if (!validIdent(name)) {
-            try { setPersistentMessage(OFX::Message::eMessageError, "",
-                std::string("Variables line ") + ln + ": '" + name + "' is not a valid name"); } catch (...) {}
-            OFX::throwSuiteStatusException(kOfxStatFailed);
-        }
+        if (!validIdent(name))
+            fail(std::string("line ") + ln + ": '" + name + "' is not a valid name");
+
+        // r/g/b/a -> output channel; otherwise a variable (must not shadow a built-in)
+        int ch = (name == "r") ? 0 : (name == "g") ? 1 : (name == "b") ? 2 : (name == "a") ? 3 : -1;
+        if (ch >= 0) { chanStr[ch] = expr; continue; }
+        if (isBuiltinName(name))
+            fail(std::string("line ") + ln + ": '" + name + "' is a built-in name; choose another");
+
         int slot = (int)ctx.names.size();
         ctx.names.push_back(name);
         expreval::Program p;
-        if (!p.compile(expr, ctx.names, err)) {
-            try { setPersistentMessage(OFX::Message::eMessageError, "",
-                "Variable '" + name + "': " + err); } catch (...) {}
-            OFX::throwSuiteStatusException(kOfxStatFailed);
-        }
+        if (!p.compile(expr, ctx.names, err))
+            fail("variable '" + name + "': " + err);
         ctx.derivedSlot.push_back(slot);
         ctx.derived.push_back(p);
     }
     ctx.nVars = (int)ctx.names.size();
 
-    std::string es[4];
-    _exprR->getValueAtTime(args.time, es[0]);
-    _exprG->getValueAtTime(args.time, es[1]);
-    _exprB->getValueAtTime(args.time, es[2]);
-    _exprA->getValueAtTime(args.time, es[3]);
     static const char* label[4] = { "r", "g", "b", "a" };
     for (int c = 0; c < 4; ++c) {
-        if (!ctx.chan[c].compile(es[c], ctx.names, err)) {
-            // setPersistentMessage is wrapped: some hosts (e.g. Resolve's Fusion
-            // OFX) don't implement the message suite and throw on it.
-            try { setPersistentMessage(OFX::Message::eMessageError, "",
-                std::string("Channel ") + label[c] + ": " + err); } catch (...) {}
-            OFX::throwSuiteStatusException(kOfxStatFailed);
-        }
+        if (!ctx.chan[c].compile(chanStr[c], ctx.names, err))
+            fail(std::string("channel ") + label[c] + ": " + err);
     }
     // Resolve's Fusion OFX host lacks the message suite, so clearPersistentMessage()
     // throws kOfxStatErrUnsupported there. Swallow it so render() can proceed.
@@ -672,17 +670,6 @@ void ExpressionPlugin::render(const OFX::RenderArguments& args)
 // ============================================================================
 mDeclarePluginFactory(ExpressionPluginFactory, {}, {});
 
-static void defineExprParam(OFX::ImageEffectDescriptor& desc, OFX::PageParamDescriptor* page,
-                            const char* name, const char* label, const char* def)
-{
-    OFX::StringParamDescriptor* p = desc.defineStringParam(name);
-    p->setLabel(label);
-    p->setStringType(OFX::eStringTypeMultiLine);
-    p->setDefault(def);
-    p->setAnimates(true);
-    page->addChild(*p);
-}
-
 void ExpressionPluginFactory::describe(OFX::ImageEffectDescriptor& desc)
 {
     desc.setLabel(kPluginName);
@@ -738,40 +725,32 @@ void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc
     dst->addSupportedComponent(OFX::ePixelComponentAlpha);
     dst->setSupportsTiles(true);
 
-    // Four separate pages so the panel reads clearly. Hosts that honour OFX pages
-    // show them as tabs; Flame labels each auto-laid-out column group by its page
-    // name (so the previously-ambiguous boxes now sit under Channels / Variables /
-    // Constants / Output).
-    OFX::PageParamDescriptor* pgChan  = desc.definePageParam("Channels");
-    OFX::PageParamDescriptor* pgVars  = desc.definePageParam("Variables");
+    // Three pages. Hosts that honour OFX pages (Resolve/Nuke) show them as tabs;
+    // Flame flattens them but the single self-labelling script box stays readable.
+    OFX::PageParamDescriptor* pgExpr  = desc.definePageParam("Expression");
     OFX::PageParamDescriptor* pgConst = desc.definePageParam("Constants");
     OFX::PageParamDescriptor* pgOut   = desc.definePageParam("Output");
 
-    // --- Channels: the four output expressions ---
-    defineExprParam(desc, pgChan, "exprR", "r =", "r");
-    defineExprParam(desc, pgChan, "exprG", "g =", "g");
-    defineExprParam(desc, pgChan, "exprB", "b =", "b");
-    defineExprParam(desc, pgChan, "exprA", "a =", "a");
-
-    // --- Variables: ONE multi-line block, one "name = expression" per line,
-    //     evaluated top to bottom before the channels. Holds both kinds of named
-    //     token: `gamma = k1` (a named constant driven by the slider) and
-    //     `lum = 0.2126*r+...` (a value derived from the image). Self-labelling, so
-    //     it stays clean even on hosts that don't render text-field labels. ---
+    // --- Expression: ONE script. One "name = expression" per line, top to bottom.
+    //     A line named r/g/b/a sets that output channel; any other name declares a
+    //     variable usable below (e.g. `lum = 0.2126*r+...`, `gamma = k1`). The four
+    //     channels evaluate independently of each other. Self-labelling (every line
+    //     says what it is), so it stays clean even where text labels don't render.
+    //     Blank lines and '#' comments are ignored. ---
     {
-        OFX::StringParamDescriptor* v = desc.defineStringParam("vars");
-        v->setLabel("variables");
-        v->setStringType(OFX::eStringTypeMultiLine);
-        v->setDefault("# one per line:  name = expression  (e.g.  gamma = k1)");
-        v->setHint("Declare variables, one 'name = expression' per line; use the names in your "
-                   "channel expressions. Reference knobs as k1..k4 (e.g. gamma = k1). "
-                   "Blank lines and lines starting with # are ignored.");
-        v->setAnimates(false);
-        pgVars->addChild(*v);
+        OFX::StringParamDescriptor* s = desc.defineStringParam("script");
+        s->setLabel("expression");
+        s->setStringType(OFX::eStringTypeMultiLine);
+        s->setDefault("r = r\ng = g\nb = b\na = a");
+        s->setHint("One 'name = expression' per line. r/g/b/a set the output channels; "
+                   "any other name is a variable usable below (e.g. lum = 0.2126*r+0.7152*g+0.0722*b, "
+                   "or gamma = k1). Knobs are k1..k4; # starts a comment.");
+        s->setAnimates(false);
+        pgExpr->addChild(*s);
     }
 
     // --- Constants: animatable k-knobs. Reference them as k1..k4, or alias one in
-    //     the Variables block (e.g. gamma = k1) to use a friendly name. ---
+    //     the script (e.g. gamma = k1) to use a friendly name. ---
     for (int i = 0; i < 4; ++i) {
         char kn[8], lk[8];
         std::sprintf(kn, "k%d", i + 1);

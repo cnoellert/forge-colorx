@@ -55,22 +55,29 @@ from there; the node appears under **Color/Math > Expression**.
 
 ## Using it
 
-The UI is split into four pages:
+Everything is one **Expression** script box — **one `name = expression` per line**,
+evaluated top to bottom:
 
-- **Channels** — the four output expressions `r =` `g =` `b =` `a =`.
-- **Variables** — one multi-line block, **one `name = expression` per line**,
-  evaluated top to bottom before the channels (so a later line can use an earlier
-  one). It carries both kinds of named token:
-  - `gamma = k1` — a **named constant** driven by the `k1` slider;
-  - `lum = 0.2126*r + 0.7152*g + 0.0722*b` — a **derived variable** computed from
-    the image.
-  Then use those names in the channels. Blank lines and lines starting with `#` are
-  ignored. (One self-labelling box, so it stays clean even on hosts — like Flame —
-  that don't render labels for text fields.)
-- **Constants** — four animatable knobs `k1..k4`, plus the **Reference Colour**
-  (`ref.r/.g/.b`). Reference them directly as `k1..k4`, or alias one in the
-  Variables block for a friendly name.
-- **Output** — **Mix** (blend original↔result) and **Clamp Output**.
+```
+gamma = k1                                # a variable aliasing the k1 knob
+lum   = 0.2126*r + 0.7152*g + 0.0722*b    # a variable derived from the image
+r = pow(r, 1/gamma)                       # set the r output
+g = lum
+b = lum
+a = a
+```
+
+- A line named **`r` `g` `b` `a`** sets that **output channel**. The four channels
+  evaluate *independently* of each other (so `r = g` / `g = r` swaps cleanly).
+  Any channel you don't assign passes through.
+- **Any other name** declares a **variable** usable on later lines — a derived value
+  (`lum = …`) or a friendly alias for a knob (`gamma = k1`). Variables evaluate in
+  order, so declare one before you use it.
+- Reference the knobs as `k1..k4`; blank lines and `#` comments are ignored.
+
+One self-labelling box means the panel stays readable even on hosts — like Flame —
+that don't render labels for text fields. The `k1..k4` sliders, **Reference Colour**,
+**Mix** and **Clamp Output** are separate (numeric) knobs.
 
 ### Predefined variables
 
