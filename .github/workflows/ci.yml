@@ -5,21 +5,63 @@ on:
   pull_request:
 
 jobs:
-  build:
+  test:
+    name: evaluator unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Expression engine unit tests
+      - name: Build + run the 36 evaluator unit tests
         run: |
           g++ -std=c++11 -O2 -I ofx/Expression tests/test_expr.cpp -o test_expr
           ./test_expr
 
-      - name: Compile + link OFX plugin against the OpenFX SDK
+  build:
+    name: build ${{ matrix.name }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: linux-x86-64 }
+          - { os: macos-latest,  name: macos-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Linux links the OFX Support lib against -lGL (see Makefile.master).
+      - name: Install Linux GL headers
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev
+
+      - name: Clone the OpenFX SDK
+        run: git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx
+
+      # Same path verified by hand on macOS: drop the plugin into the Support
+      # examples tree so Makefile.master compiles the Support lib + assembles the
+      # .ofx.bundle (with its Info.plist and the per-platform arch dir:
+      # Contents/Linux-x86-64 or Contents/MacOS). DEBUGFLAG=-O2 optimises while
+      # keeping DEBUGNAME=debug so the macOS-only osxDeploy.sh step is skipped.
+      - name: Build Expression.ofx.bundle
         run: |
-          git clone --depth 1 https://github.com/AcademySoftwareFoundation/openfx
-          INC="-I openfx/include -I openfx/Support/include -I ofx/Expression"
-          g++ -std=c++11 -fPIC -c $INC openfx/Support/Library/*.cpp
-          g++ -std=c++11 -fPIC -c $INC ofx/Expression/Expression.cpp -o Expression.o
-          g++ -shared -fPIC -o Expression.ofx Expression.o ofxs*.o
-          test -f Expression.ofx && echo "OFX plugin linked OK"
+          cp -R ofx/Expression openfx/Support/Plugins/Expression
+          make -C openfx/Support/Plugins/Expression DEBUGFLAG=-O2
+
+      - name: Locate + sanity-check the bundle
+        id: bundle
+        run: |
+          BUNDLE=$(find openfx/Support/Plugins/Expression -type d -name 'Expression.ofx.bundle' | head -1)
+          OFX=$(find "$BUNDLE" -type f -name 'Expression.ofx' | head -1)
+          test -n "$OFX" || { echo "::error::no Expression.ofx produced"; exit 1; }
+          echo "Built: $OFX"
+          file "$OFX"
+          # the OFX C entry point must be exported, or no host can load it
+          nm -g "$OFX" | grep -q OfxGetPlugin && echo "exports OfxGetPlugin: OK" \
+            || { echo "::error::OfxGetPlugin not exported"; exit 1; }
+          echo "bundle=$BUNDLE" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the .ofx.bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Expression.ofx-${{ matrix.name }}
+          path: ${{ steps.bundle.outputs.bundle }}
+          if-no-files-found: error
