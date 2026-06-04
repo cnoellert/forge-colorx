@@ -48,8 +48,15 @@ forge-colorx/
   - at **32-bit float**: exact `0.6000000 / 0.4000000 / 0.6800000` (HDR-safe,
     unclamped — the float path is a straight `(PIX)v`),
   - at 8-bit it quantises as expected (`0.678 == 173/255`).
+- **OFX plugin HOST-VERIFIED in Autodesk Flame 2026.2.2 (macOS arm64).** Loaded
+  as an `OpenFX` Batch node (`change_plugin('Expression')` → our `r=/g=/b=/a=`
+  tabs, no rejection by Flame's picky OFX host), ran without crashing, and a
+  **typed `r = 0.5` rendered to an exact `0.500000`** with the other channels
+  passing through — confirming typed-expression evaluation works in Flame. The
+  `clearPersistentMessage` guard held here too (Flame's OFX host is also strict).
 - **Matchbox GLSL**: ASCII-clean, XML well-formed. Targets `#version 120` for
-  Linux+macOS Flame.
+  Linux+macOS Flame. `shader_builder` accepts it (exit 0) but a true GPU compile
+  (load as a Matchbox node in Flame) is still unverified.
 
 ### Fixes made during host verification (see git log)
 
@@ -67,16 +74,19 @@ These were required to actually run in Resolve and are now in the source:
 
 ### NOT yet verified (next person / next session)
 
-- **Flame specifically.** Verified in Resolve (OFX); not yet loaded in Flame
-  itself (2021+ OFX, or the Matchbox build). Cross-platform builds still TODO:
-  **x86_64 Linux + Flame on both platforms** is the eventual target.
-- Matchbox `shader_builder -m ColorExpression.glsl` has not been run on a Flame
-  box (no `shader_builder` available where this was authored).
-- **Test-harness caveat:** Fusion's *scripting* `SetInput()` does not push OFX
-  string-param values into the plugin instance (the plugin reads describe-time
-  defaults). This is a Fusion scripting-bridge quirk, **not** a plugin bug —
-  typed-in-UI params use the standard `getValueAtTime` path. Automated pixel
-  tests therefore drive the expressions via the param *defaults*.
+- **x86_64 Linux build.** Only the macOS arm64 build has been produced/verified.
+  CI compiles the `.ofx` on Linux x86-64, but no proper Linux bundle has been
+  packaged/loaded. **This is the next target** (Flame/Resolve on Linux).
+- **Matchbox node loaded in Flame.** `shader_builder` accepts the GLSL (exit 0),
+  but the real GPU compile only happens when loaded as a Matchbox node in Flame —
+  not yet done. (The OFX build is verified in Flame; the Matchbox build is not.)
+- **Universal macOS build** (arm64 + x86_64) for Intel-Mac Flame/Resolve — the
+  arm64-only build covers Apple Silicon; `Makefile.master` has a Universal mode.
+- **Host caveat (both Resolve & Flame):** neither host populates the OFX
+  describe-time string defaults into the editable fields, and neither exposes the
+  string params to its scripting API. This is a host quirk, **not** a plugin bug
+  — typed-in-UI expressions evaluate correctly (verified: Flame `r=0.5` → exact
+  `0.5`). Automated pixel tests therefore drive expressions via param *defaults*.
 
 ## How to build
 
