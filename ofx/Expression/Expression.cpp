@@ -166,9 +166,6 @@ static inline unsigned short floatToHalf(float f)
 #define kPluginVersionMajor 1
 #define kPluginVersionMinor 0
 
-// number of temp-variable rows, matching Nuke's Expression tab
-#define kNumTemps 4
-
 // indices of the fixed predefined variables in the variable buffer. r..frame are
 // per-pixel / per-render; k1..k4 and ref.r/.g/.b are the user-constant knobs
 // (uniform across the frame) that bring the OFX in line with the Matchbox build.
@@ -312,13 +309,7 @@ public:
         _exprG = fetchStringParam("exprG");
         _exprB = fetchStringParam("exprB");
         _exprA = fetchStringParam("exprA");
-        for (int t = 0; t < kNumTemps; ++t) {
-            char n[16], e[16];
-            std::sprintf(n, "tempName%d", t);
-            std::sprintf(e, "tempExpr%d", t);
-            _tempName[t] = fetchStringParam(n);
-            _tempExpr[t] = fetchStringParam(e);
-        }
+        _vars  = fetchStringParam("vars");
         _k1 = fetchDoubleParam("k1"); _k2 = fetchDoubleParam("k2");
         _k3 = fetchDoubleParam("k3"); _k4 = fetchDoubleParam("k4");
         for (int i = 0; i < 4; ++i) {
@@ -353,8 +344,7 @@ private:
     OFX::Clip*        _srcClip;
     OFX::StringParam* _exprR; OFX::StringParam* _exprG;
     OFX::StringParam* _exprB; OFX::StringParam* _exprA;
-    OFX::StringParam* _tempName[kNumTemps];
-    OFX::StringParam* _tempExpr[kNumTemps];
+    OFX::StringParam* _vars;             // multi-line "name = formula" variables block
     OFX::DoubleParam* _k1; OFX::DoubleParam* _k2;
     OFX::DoubleParam* _k3; OFX::DoubleParam* _k4;
     OFX::StringParam* _kName[4];          // optional alias names for k1..k4
@@ -362,6 +352,29 @@ private:
     OFX::DoubleParam* _mix;
     OFX::BooleanParam* _clamp;
 };
+
+static std::string trimws(const std::string& s)
+{
+    size_t a = s.find_first_not_of(" \t\r\n");
+    if (a == std::string::npos) return std::string();
+    size_t b = s.find_last_not_of(" \t\r\n");
+    return s.substr(a, b - a + 1);
+}
+
+// A user variable name: a plain identifier (letters/digits/underscore, not starting
+// with a digit). ref.r etc. are predefined and keep their dotted form.
+static bool validIdent(const std::string& s)
+{
+    if (s.empty()) return false;
+    char c0 = s[0];
+    if (!((c0 >= 'a' && c0 <= 'z') || (c0 >= 'A' && c0 <= 'Z') || c0 == '_')) return false;
+    for (size_t i = 1; i < s.size(); ++i) {
+        char c = s[i];
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '_')) return false;
+    }
+    return true;
+}
 
 void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContext& ctx)
 {
@@ -397,21 +410,39 @@ void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContex
         ctx.derived.push_back(p);
     }
 
-    // (2) Named variables: name + formula (a value derived from the image / other
-    // vars), evaluated in order so a later variable can use an earlier one.
-    for (int t = 0; t < kNumTemps; ++t) {
-        std::string tname, texpr;
-        _tempName[t]->getValueAtTime(args.time, tname);
-        _tempExpr[t]->getValueAtTime(args.time, texpr);
-        if (tname.empty()) continue;
+    // (2) Named variables: ONE multi-line block, one "name = formula" per statement
+    // (separated by ';' OR newline — Flame collapses newlines, so ';' is the portable
+    // separator there). A value derived from the image / other vars / constants,
+    // evaluated in order so a later variable can use an earlier one. Blank statements
+    // and '#' comments are ignored.
+    std::string vars; _vars->getValueAtTime(args.time, vars);
+    auto failVar = [&](const std::string& m) {
+        try { setPersistentMessage(OFX::Message::eMessageError, "", m); } catch (...) {}
+        OFX::throwSuiteStatusException(kOfxStatFailed);
+    };
+    size_t pos = 0; int stmtNo = 0;
+    while (pos < vars.size()) {
+        size_t nl = vars.find('\n', pos), sc = vars.find(';', pos);
+        size_t end = (nl < sc) ? nl : sc;     // npos is max, so this picks the nearer
+        std::string line = vars.substr(pos, (end == std::string::npos) ? std::string::npos : end - pos);
+        pos = (end == std::string::npos) ? vars.size() : end + 1;
+        ++stmtNo;
+        line = trimws(line);
+        if (line.empty() || line[0] == '#') continue;
+
+        char ln[16]; std::sprintf(ln, "%d", stmtNo);
+        size_t eq = line.find('=');   // the assignment '='; any ==,<=,!= sit on the RHS
+        if (eq == std::string::npos)
+            failVar(std::string("variable ") + ln + ": expected 'name = formula'");
+        std::string name = trimws(line.substr(0, eq));
+        std::string expr = trimws(line.substr(eq + 1));
+        if (!validIdent(name))
+            failVar(std::string("variable ") + ln + ": '" + name + "' is not a valid name");
         int slot = (int)ctx.names.size();
-        ctx.names.push_back(tname);
+        ctx.names.push_back(name);
         expreval::Program p;
-        if (!p.compile(texpr, ctx.names, err)) {
-            try { setPersistentMessage(OFX::Message::eMessageError, "",
-                "Variable '" + tname + "': " + err); } catch (...) {}
-            OFX::throwSuiteStatusException(kOfxStatFailed);
-        }
+        if (!p.compile(expr, ctx.names, err))
+            failVar("variable '" + name + "': " + err);
         ctx.derivedSlot.push_back(slot);
         ctx.derived.push_back(p);
     }
@@ -741,22 +772,21 @@ void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc
     defineExprParam(desc, pgChan, "exprB", "b =", "b");
     defineExprParam(desc, pgChan, "exprA", "a =", "a");
 
-    // --- Variables: name + formula. A value DERIVED from the image (or earlier
-    //     variables/constants). Name it, then use that name in the channels. ---
-    for (int t = 0; t < kNumTemps; ++t) {
-        char n[16], e[16], ln[24], le[28];
-        std::sprintf(n, "tempName%d", t);
-        std::sprintf(e, "tempExpr%d", t);
-        std::sprintf(ln, "var %d name", t + 1);
-        std::sprintf(le, "var %d  =", t + 1);
-        OFX::StringParamDescriptor* pn = desc.defineStringParam(n);
-        pn->setLabel(ln);
-        pn->setStringType(OFX::eStringTypeSingleLine);
-        pn->setDefault("");
-        pn->setHint("Name a derived variable (blank = row off); use the name in your channel expressions.");
-        pn->setAnimates(false);
-        pgVars->addChild(*pn);
-        defineExprParam(desc, pgVars, e, le, "");
+    // --- Variables: ONE multi-line block, one "name = formula" per statement
+    //     (separated by ';' or newline). A value DERIVED from the image (or earlier
+    //     variables/constants); use the name in the channels. Self-labelling (each
+    //     statement says what it is), so it stays readable even where Flame won't
+    //     render text-field labels — the four separate name/formula boxes did not. ---
+    {
+        OFX::StringParamDescriptor* v = desc.defineStringParam("vars");
+        v->setLabel("variables");
+        v->setStringType(OFX::eStringTypeMultiLine);
+        v->setDefault("# name = formula  (e.g.  lum = 0.2126*r+0.7152*g+0.0722*b)");
+        v->setHint("Derived variables, one 'name = formula' per statement (separate with ';' or a "
+                   "newline). Use the name in your r/g/b/a channels. Can use r g b a, k1..k4, ref.r..., "
+                   "and earlier variables. '#' starts a comment.");
+        v->setAnimates(false);
+        pgVars->addChild(*v);
     }
 
     // --- Constants: animatable k-knobs, each with an optional alias name. The

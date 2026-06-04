@@ -57,17 +57,20 @@ from there; the node appears under **Color/Math > Expression**.
 
 The UI is split into four pages:
 
-- **Channels** — the four output expressions `r =` `g =` `b =` `a =`.
-- **Variables** — four `var N name` / `var N =` rows: name a value **derived by a
-  formula** (luminance, a vignette falloff, …) and reuse it in the channels.
-  Evaluated top to bottom before the channels — exactly like Nuke's temporaries.
+- **Channels** — the four output expressions `r =` `g =` `b =` `a =`, one box each.
+- **Variables** — ONE multi-line block of **`name = formula`** statements (separate
+  with `;` or a newline), a value **derived by a formula** (luminance, a vignette
+  falloff, …) reusable in the channels. Evaluated in order before the channels. One
+  self-labelling box (each line says what it is) rather than separate name/formula
+  fields, so it stays readable where Flame won't render text-field labels.
 - **Constants** — four animatable knobs `k1..k4`, each with an optional **`kN name`**
-  alias, plus the **Reference Colour**. The slider drives the value; the name is a
-  friendly token for it. Name `k1` "gamma" and both `gamma` and `k1` resolve to that
-  slider in any expression.
+  alias box, plus the **Reference Colour**. The slider drives the value; the name is
+  a friendly token. Name `k1` "gamma" and both `gamma` and `k1` resolve to that
+  slider. (These stay as separate boxes because the labelled `k` slider anchors the
+  alias box next to it.)
 - **Output** — **Mix** (blend original↔result) and **Clamp Output**.
 
-So there are two kinds of named token: a **Variable** is *computed* (name + formula),
+Two kinds of named token: a **Variable** is *computed* (name + formula, in the block),
 a **Constant** is *dialed* (name + slider). Both are usable anywhere in the channels.
 
 ### Predefined variables
