@@ -25,17 +25,19 @@ forge-colorx/
 ├── tests/
 │   ├── test_expr.cpp              36 evaluator unit tests
 │   ├── test_transpile.cpp         AST->kernel transpiler differential test (vs eval)
-│   └── test_metal.mm             real-GPU Metal differential test (vs eval oracle)
+│   ├── test_metal.mm             real-GPU Metal scalar differential test (vs eval)
+│   └── test_metal_render.mm      real-GPU Metal pixel-path test (vs CPU binding)
 ├── matchbox/ColorExpression/
 │   ├── ColorExpression.glsl       #version 120; full Nuke function library;
 │   │                              channel formulas in an EXPRESSION BLOCK
 │   ├── ColorExpression.xml        UI sidecar (k1..k4, ref colour, mix, clamp)
 │   └── README.md                  build/install + Nuke→Matchbox parity table
 └── ofx/Expression/
-    ├── Expression.cpp             OFX plugin (params, render, channel dispatch)
+    ├── Expression.cpp             OFX plugin (params, render, CPU + Metal dispatch)
     ├── ExprEval.h                 Pratt parser + evaluator + emitC() transpiler
     ├── ExprKernel.h               exh_* helper prelude for transpiled kernels (CPU)
-    ├── ExprKernelMetal.h          exh_* prelude in Metal Shading Language (GPU)
+    ├── ExprKernelMetal.h          MSL prelude + per-pixel kernel builder (GPU)
+    ├── ExprMetal.h / ExprMetal.mm Obj-C++ Metal dispatch (compile/cache + encode)
     ├── Info.plist                 OFX bundle plist (required to load)
     ├── Makefile                   builds Expression.ofx.bundle
     └── README.md                  build/install + parity table + examples
@@ -145,9 +147,11 @@ Flame scan `/Library/OFX/Plugins` on macOS; **a host only re-reads OFX at launch
 ```bash
 g++ -std=c++11 -O2 -I ofx/Expression tests/test_expr.cpp      -o /tmp/te && /tmp/te
 c++ -std=c++11 -O2 -I ofx/Expression tests/test_transpile.cpp -o /tmp/tt && /tmp/tt
-# Metal GPU diff (macOS; needs a Metal device — SKIPs cleanly without one):
+# Metal GPU tests (macOS; need a Metal device — SKIP cleanly without one):
 clang++ -std=c++17 -ObjC++ -O2 -I ofx/Expression tests/test_metal.mm \
     -framework Metal -framework Foundation -o /tmp/tm && /tmp/tm
+clang++ -std=c++17 -ObjC++ -O2 -I ofx/Expression tests/test_metal_render.mm \
+    ofx/Expression/ExprMetal.mm -framework Metal -framework Foundation -o /tmp/tmr && /tmp/tmr
 ```
 
 ## GPU render path (in progress)
@@ -176,12 +180,31 @@ CPU evaluator is the **numeric oracle** for every target.
      when no Metal device, so CI on headless macOS stays green. CI also runs an
      **offline `xcrun metal` compile-check** of the emitted MSL (`--emit` mode) —
      gating Metal syntax with no GPU, the analog of the planned CUDA nvrtc check.
-  3. ⏭ **NEXT — wire into `Expression.cpp render()`:** when `args.isEnabledMetalRender`
-     (Support lib already surfaces it + `args.pMetalCmdQ`), build the per-pixel
-     `kernel void` over the image `id<MTLBuffer>`s (`kOfxImagePropData` is a
-     MTLBuffer when Metal-enabled), compile/cache MSL by expr-set hash, dispatch
-     on the host command queue. Declare `setSupportsMetalRender(true)` in describe.
-     Keep the CPU path as fallback. Then EXR-diff vs CPU in Resolve on this Mac.
+  3. ✅ **Wired into `Expression.cpp render()` (code complete, GPU-verified
+     locally; Resolve host-verify pending).** `describe()` now calls
+     `setSupportsMetalRender(true)`; `render()` takes the GPU path when
+     `args.isEnabledMetalRender && args.pMetalCmdQ` and falls back to CPU on any
+     failure. `buildMetalPixelKernel()` (in `ExprKernelMetal.h`) emits the
+     per-pixel `kernel void exprKernel` — source read from the image MTLBuffer,
+     the exact ExpressionProcessor var binding (x,y bottom-left; centred
+     aspect-preserved cx,cy; width/height/frame), temps in order, channel-remapped
+     float write. `ExprMetal.mm` (Obj-C++ bridge, `void*` C++ interface in
+     `ExprMetal.h`) compiles+caches MSL by source string and dispatches on the
+     host's command queue (waits for completion in v1). The Makefile adds
+     `ExprMetal.o` + `-framework Metal -framework Foundation` + `-DHAVE_METAL` on
+     Darwin only; Linux/CUDA build unchanged.
+     **Verified:** `tests/test_metal_render.mm` drives the real `buildMetalPixelKernel`
+     + `metalRender` over actual MTLBuffers on the M4 Max and diffs vs the CPU
+     binding — passthrough, channel swap, cx/cy, x/width, mixed math, and a temp
+     variable all match to ~1e-7. The macOS bundle builds + links (arm64, exports
+     `OfxGetPlugin`, links Metal/Foundation). CI offline-compiles both the scalar
+     and the production pixel kernel with `xcrun metal`.
+  4. ⏭ **NEXT — host-verify in Resolve on this Mac.** Load the bundle, render a
+     known input through the Metal path, EXR-diff vs the CPU path (expect ~float
+     epsilon for deterministic exprs). Confirm Resolve actually drives the Metal
+     render (sets `MetalEnabled` + passes MTLBuffers); if not, the CPU fallback
+     still renders correctly. Then consider dropping the `waitUntilCompleted` for
+     async dispatch per the OFX spec.
   - **Noise parity (resolved for value-noise; `random()` caveated).** The noise
     sub-library is now computed in **float on every target** (`ev_*f` in
     `ExprEval.h`, `exh_*` in `ExprKernel.h` + `ExprKernelMetal.h`), so the CPU
@@ -241,6 +264,12 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Session history (newest first)
 
+- GPU Phase 2 (render wiring): per-pixel Metal kernel builder + `ExprMetal.mm`
+  dispatch bridge wired into `render()` (CPU fallback), `setSupportsMetalRender`,
+  Darwin-only Makefile. Pixel path GPU-verified vs the CPU binding
+  (`test_metal_render.mm`, ~1e-7); bundle builds+links. Resolve host-verify next.
+- GPU Phase 2 (noise parity): float-internal value-noise so CPU == GPU
+  (bit-identical value-noise; `random()` still caveated). 
 - GPU Phase 2 (foundation): Metal MSL prelude (`ExprKernelMetal.h`) + real-GPU
   differential test (`test_metal.mm`), verified on an Apple M4 Max — deterministic
   math worst err 2.75e-07. CI compile-checks the MSL with `xcrun metal`. Found +

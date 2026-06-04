@@ -31,6 +31,14 @@
 
 #include "ExprEval.h"
 
+// Metal GPU render path (macOS only — the Makefile defines HAVE_METAL and links
+// the Metal/Foundation frameworks on Darwin). Pure-C++ bridge; see ExprMetal.h.
+#ifdef HAVE_METAL
+#include "ExprKernelMetal.h"
+#include "ExprMetal.h"
+#include <utility>
+#endif
+
 // ---- IEEE-754 half <-> float (Fusion/Resolve deliver 16-bit float images) ----
 static inline float halfToFloat(unsigned short h)
 {
@@ -217,6 +225,12 @@ private:
     template <class PIX, int nComps, int maxValue, bool HALF = false>
     void process(const OFX::RenderArguments& args, const ExprContext& ctx);
 
+#ifdef HAVE_METAL
+    // GPU render via Metal. Returns false (caller falls back to CPU) if the host
+    // isn't giving float Metal buffers or anything goes wrong.
+    bool renderMetal(const OFX::RenderArguments& args, const ExprContext& ctx);
+#endif
+
     OFX::Clip*        _dstClip;
     OFX::Clip*        _srcClip;
     OFX::StringParam* _exprR; OFX::StringParam* _exprG;
@@ -302,10 +316,71 @@ void ExpressionPlugin::process(const OFX::RenderArguments& args, const ExprConte
     proc.process();
 }
 
+#ifdef HAVE_METAL
+bool ExpressionPlugin::renderMetal(const OFX::RenderArguments& args, const ExprContext& ctx)
+{
+    // GPU path is float-only (Resolve's Metal render delivers float buffers).
+    if (_dstClip->getPixelDepth() != OFX::eBitDepthFloat) return false;
+
+    OFX::PixelComponentEnum comps = _dstClip->getPixelComponents();
+    int nComps = (comps == OFX::ePixelComponentRGBA)  ? 4
+               : (comps == OFX::ePixelComponentRGB)   ? 3
+               : (comps == OFX::ePixelComponentAlpha) ? 1 : 0;
+    if (nComps == 0) return false;
+
+    // Transpile the compiled programs to one MSL kernel for this expression set.
+    std::string chan[4] = { ctx.chan[0].emitC(), ctx.chan[1].emitC(),
+                            ctx.chan[2].emitC(), ctx.chan[3].emitC() };
+    std::vector<std::pair<int, std::string> > temps;
+    for (int t = 0; t < kNumTemps; ++t)
+        if (ctx.tempSlot[t] >= 0)
+            temps.push_back(std::make_pair(ctx.tempSlot[t], ctx.temps[t].emitC()));
+    std::string msl = expreval::buildMetalPixelKernel(chan, temps, ctx.nVars);
+
+    std::unique_ptr<OFX::Image> dst(_dstClip->fetchImage(args.time));
+    if (!dst.get()) return false;
+    std::unique_ptr<OFX::Image> src(_srcClip && _srcClip->isConnected()
+                                  ? _srcClip->fetchImage(args.time) : 0);
+
+    expreval::MetalImageDesc dd, sd;
+    OfxRectI db = dst->getBounds();
+    dd.buffer = dst->getPixelData();
+    dd.x1 = db.x1; dd.y1 = db.y1;
+    dd.rowFloats = dst->getRowBytes() / (int)sizeof(float);
+    if (!dd.buffer) return false;
+
+    int hasSrc = 0;
+    if (src.get()) {
+        OfxRectI sb = src->getBounds();
+        sd.buffer = src->getPixelData();
+        sd.x1 = sb.x1; sd.y1 = sb.y1;
+        sd.rowFloats = src->getRowBytes() / (int)sizeof(float);
+        hasSrc = (sd.buffer != 0) ? 1 : 0;
+    }
+
+    std::string err;
+    bool ok = expreval::metalRender(
+        args.pMetalCmdQ, sd, hasSrc, dd,
+        args.renderWindow.x1, args.renderWindow.y1,
+        args.renderWindow.x2, args.renderWindow.y2,
+        nComps, (float)ctx.width, (float)ctx.height, (float)ctx.frame,
+        msl, err);
+    if (!ok) { try { setPersistentMessage(OFX::Message::eMessageError, "",
+                       "Metal render failed (CPU fallback): " + err); } catch (...) {} }
+    return ok;
+}
+#endif // HAVE_METAL
+
 void ExpressionPlugin::render(const OFX::RenderArguments& args)
 {
     ExprContext ctx;
     buildContext(args, ctx);
+
+#ifdef HAVE_METAL
+    // Prefer the GPU when the host is driving a Metal render; fall back to CPU.
+    if (args.isEnabledMetalRender && args.pMetalCmdQ && renderMetal(args, ctx))
+        return;
+#endif
 
     OFX::BitDepthEnum       depth = _dstClip->getPixelDepth();
     OFX::PixelComponentEnum comps = _dstClip->getPixelComponents();
@@ -376,6 +451,12 @@ void ExpressionPluginFactory::describe(OFX::ImageEffectDescriptor& desc)
     desc.setRenderTwiceAlways(false);
     desc.setSupportsMultipleClipPARs(false);
     desc.setRenderThreadSafety(OFX::eRenderFullySafe);
+
+#ifdef HAVE_METAL
+    // Advertise the Metal render path; the host then MAY hand us float MTLBuffers
+    // + a command queue at render (we fall back to CPU whenever it doesn't).
+    try { desc.setSupportsMetalRender(true); } catch (...) {}
+#endif
 }
 
 void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc, OFX::ContextEnum /*context*/)

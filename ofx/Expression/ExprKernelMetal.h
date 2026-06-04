@@ -124,5 +124,68 @@ inline std::string buildMetalScalarKernels(const std::vector<std::string>& bodie
     return s;
 }
 
+// ---- production per-pixel kernel ---------------------------------------------
+// The uniforms struct passed to the kernel. ExprMetal.mm defines a byte-identical
+// C++ struct (same field order/types) — keep them in lockstep.
+//   struct ExprMetalUniforms {
+//     int rwx1,rwy1,rwx2,rwy2;  src/dst origins + row strides (in floats);
+//     int srcX1,srcY1,srcRowFloats; int dstX1,dstY1,dstRowFloats;
+//     int nComps,hasSrc; float fwidth,fheight,frame; };
+//
+// Build the full MSL for one expression set: read the source pixel from its
+// MTLBuffer, bind the predefined variables exactly as ExpressionProcessor does
+// on the CPU (origin bottom-left x,y; centred aspect-preserved cx,cy), evaluate
+// the temps in order then the four channel expressions, and write the result.
+// `temps` are (slot, emitC() body) pairs in evaluation order; `chan[4]` are the
+// emitC() bodies for r,g,b,a; `nVars` sizes the v[] array (fixed vars + temps).
+inline std::string buildMetalPixelKernel(const std::string chan[4],
+        const std::vector<std::pair<int,std::string>>& temps, int nVars) {
+    const std::string nv = std::to_string(nVars);
+    std::string s = kExprMetalPrelude;
+    s +=
+"\n"
+"struct ExprMetalUniforms {\n"
+"    int rwx1, rwy1, rwx2, rwy2;\n"
+"    int srcX1, srcY1, srcRowFloats;\n"
+"    int dstX1, dstY1, dstRowFloats;\n"
+"    int nComps, hasSrc;\n"
+"    float fwidth, fheight, frame;\n"
+"};\n"
+"\n"
+"kernel void exprKernel(device const float* src [[buffer(0)]],\n"
+"                       device float* dst [[buffer(1)]],\n"
+"                       constant ExprMetalUniforms& U [[buffer(2)]],\n"
+"                       uint2 gid [[thread_position_in_grid]]) {\n"
+"    int gx = U.rwx1 + (int)gid.x;\n"
+"    int gy = U.rwy1 + (int)gid.y;\n"
+"    if (gx >= U.rwx2 || gy >= U.rwy2) return;\n"
+"    float r = 0.0, g = 0.0, b = 0.0, a = (U.nComps == 4 || U.nComps == 1) ? 0.0 : 1.0;\n"
+"    if (U.hasSrc != 0) {\n"
+"        int si = (gy - U.srcY1) * U.srcRowFloats + (gx - U.srcX1) * U.nComps;\n"
+"        if (U.nComps == 1) { a = src[si]; }\n"
+"        else { r = src[si]; g = src[si+1]; b = src[si+2]; if (U.nComps == 4) a = src[si+3]; }\n"
+"    }\n"
+"    float v[" + nv + "];\n"
+"    v[0] = r; v[1] = g; v[2] = b; v[3] = a;\n"
+"    v[4] = (float)gx; v[5] = (float)gy;\n"
+"    float halfW = U.fwidth * 0.5; float halfH = U.fheight * 0.5;\n"
+"    float invHalfW = (halfW != 0.0) ? 1.0 / halfW : 0.0;\n"
+"    v[6] = ((float)gx - halfW) * invHalfW;\n"
+"    v[7] = ((float)gy - halfH) * invHalfW;\n"
+"    v[8] = U.fwidth; v[9] = U.fheight; v[10] = U.frame;\n";
+    for (size_t t = 0; t < temps.size(); ++t)
+        s += "    v[" + std::to_string(temps[t].first) + "] = (" + temps[t].second + ");\n";
+    s +=
+"    float o0 = (" + chan[0] + ");\n"
+"    float o1 = (" + chan[1] + ");\n"
+"    float o2 = (" + chan[2] + ");\n"
+"    float o3 = (" + chan[3] + ");\n"
+"    int di = (gy - U.dstY1) * U.dstRowFloats + (gx - U.dstX1) * U.nComps;\n"
+"    if (U.nComps == 1) { dst[di] = o3; }\n"
+"    else { dst[di] = o0; dst[di+1] = o1; dst[di+2] = o2; if (U.nComps == 4) dst[di+3] = o3; }\n"
+"}\n";
+    return s;
+}
+
 } // namespace expreval
 #endif // EXPR_KERNEL_METAL_H
