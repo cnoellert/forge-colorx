@@ -27,7 +27,9 @@ forge-colorx/
 │   ├── test_transpile.cpp         AST->kernel transpiler differential test (vs eval)
 │   ├── test_metal.mm             real-GPU Metal scalar differential test (vs eval)
 │   ├── test_metal_render.mm      real-GPU Metal pixel-path test (vs CPU binding)
-│   └── test_cuda.cpp             NVRTC compile-check for the CUDA kernels (no GPU)
+│   ├── test_cuda.cpp             NVRTC compile-check for the CUDA kernels (no GPU)
+│   ├── test_cuda_run.cpp         real-GPU CUDA scalar differential test (vs eval)
+│   └── test_cuda_render.cpp      real-GPU CUDA pixel-path test (vs CPU binding)
 ├── matchbox/ColorExpression/
 │   ├── ColorExpression.glsl       #version 120; full Nuke function library;
 │   │                              channel formulas in an EXPRESSION BLOCK
@@ -40,6 +42,7 @@ forge-colorx/
     ├── ExprKernelMetal.h          MSL prelude + per-pixel kernel builder (GPU)
     ├── ExprMetal.h / ExprMetal.mm Obj-C++ Metal dispatch (compile/cache + encode)
     ├── ExprKernelCuda.h           CUDA C prelude + kernel builders (NVRTC)
+    ├── ExprCuda.h / ExprCuda.cpp  driver-API CUDA dispatch (NVRTC compile/cache + launch)
     ├── Info.plist                 OFX bundle plist (required to load)
     ├── Makefile                   builds Expression.ofx.bundle
     └── README.md                  build/install + parity table + examples
@@ -283,17 +286,44 @@ CPU evaluator is the **numeric oracle** for every target.
      `exprKernel` → 7 KB PTX, only benign unused-helper warnings. (CI caught a real
      NVRTC overload-ambiguity our local C++ check couldn't — `pow/fmax/fmod(float,
      double)` — fixed by the double-widening above; this Mac has no CUDA toolchain.)
-  3. ⏭ **NEXT — runtime parity on the user's Linux/NVIDIA box.** Add the GPU
-     differential run (driver API: load the NVRTC PTX, dispatch over random inputs,
-     diff vs `eval()` — expect deterministic ~float precision, value-noise exact,
-     `random()` caveated as on Metal). Can't be written/verified blind here; do it
-     on the box.
-  4. ⏭ **Render wiring** — `ExprCuda` dispatch (NVRTC compile+cache, driver-API
-     launch on `args.pCudaStream`) + a `render()` branch behind
-     `args.isEnabledCudaRender`, **host-gated** like Metal (see
-     `hostDrivesMetalSafely` — add the CUDA analogue once we know which Linux hosts
-     drive OFX-CUDA safely). Makefile compiles the CUDA unit + links nvrtc/cuda only
-     where the toolkit is present. Build won't change on macOS.
+  3. ✅ **Runtime parity — DONE on `flame-01` (RTX 5000 Ada, sm_89, NVRTC 12.1).**
+     `tests/test_cuda_run.cpp` — driver-API differential run (NVRTC→PTX→
+     `cuModuleLoadData`→`cuLaunchKernel`, diff vs `eval()` over 50 exprs × 5000
+     inputs). Result is **stronger than Metal**: deterministic worst **5.96e-08**
+     (the kernel does the math in *double*; the only gap is the final round to the
+     float output buffer, exactly as the render path stores float pixels);
+     **value-noise worst err EXACTLY 0** (bit-identical, better than Metal's ~5/5000
+     on large coords); `random()` worst 0.0039 (far better than Metal's ~20%).
+     **KEY FINDING: NVRTC must compile with `--fmad=false`.** By default it fuses
+     `a*b+c`→`fma`, perturbing the low bits of the large product in the noise/random
+     hash; `fract()` of a large number amplifies that into a big swing (~40% of
+     value-noise diverged with fmad on). SKIPs cleanly with no GPU. **Built with no
+     new install** — reused the existing `corridorkey-cuda` conda env's CUDA 12.1
+     wheels (nvrtc + driver headers); real `libcuda.so.1` is the system driver. See
+     [[flame-01-linux-testbed]] for the exact build/run recipe.
+  4. ✅ **Render wiring — code complete + GPU-verified pixel path (in-host verify
+     pending).** `ExprCuda.h/.cpp` — pure-C++ driver-API bridge mirroring
+     `ExprMetal.h/.mm`: NVRTC-compiles `buildCudaPixelKernel()` (cached by source,
+     `--fmad=false`), loads into the host's current CUDA context, launches
+     `exprKernel` on `args.pCudaStream` over the host's device buffers
+     (`cuStreamSynchronize` in v1). `Expression.cpp` adds `renderCuda()` + a
+     `render()` branch behind `hostDrivesCudaSafely() && args.isEnabledCudaRender &&
+     args.pCudaStream`, and `describe()` `setSupportsCudaRender(true)` — **host-gated
+     to Resolve** exactly like `hostDrivesMetalSafely` (Flame is never advertised
+     CUDA, so it stays safely on the CPU path). `Makefile` adds a `WITH_CUDA=1`
+     opt-in (Linux); a default Linux build stays CPU-only so the CI bundle is
+     unchanged; `CUDA_INC/CUDA_LIB` are overridable for the conda-wheel layout.
+     **Verified:** `tests/test_cuda_render.cpp` drives the REAL `cudaRender()` +
+     `buildCudaPixelKernel` over CUDA device buffers and diffs vs the CPU
+     ExpressionProcessor binding — passthrough/swap/cx,cy **exact**; x/width, mixed
+     math, temp var ~6e-8 (matches/beats the Metal pixel path). The CUDA-enabled
+     Linux `.ofx.bundle` builds + links (ELF x86-64, exports `OfxGetPlugin`, NEEDS
+     `libnvrtc.so.12` + `libcuda.so.1`, both resolve). CI `cuda` job now also
+     compile-links `ExprCuda.cpp` + the pixel test against the driver API.
+     ⏭ **Still open:** in-host verify of the CUDA path in **Linux Resolve** (the
+     analogue of the Metal Resolve verification — needs Resolve on `flame-01` + a
+     user-driven render; paths in [[flame-01-linux-testbed]]); then drop
+     `cuStreamSynchronize` for async dispatch per the OFX spec.
 - **Phase 4:** wire GPU into `render()` with CPU fallback; close GLSL/Matchbox.
 
 OFX GPU refs: `openfx/include/ofxGPURender.h`, and the OpenFX/Support GPU bits.
@@ -326,9 +356,11 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
    behind `args.isEnabledMetalRender` with a CPU fallback, then EXR-diff vs CPU in
    Resolve on this Mac. Decide the noise/random float-parity question first (see
    the KNOWN PARITY GAP note) — it affects whether GPU noise matches CPU noise.
-2. **GPU Phase 3 — CUDA**, with runtime parity on `flame-01` (RTX 5000 Ada).
-   Install the CUDA toolkit there first (`nvcc`/`nvrtc` absent), then the driver-API
-   differential run + render wiring.
+2. ✅ **GPU Phase 3 — CUDA**: runtime parity + render wiring DONE and GPU-verified
+   on `flame-01` (RTX 5000 Ada). Remaining: in-host verify the CUDA render path in
+   **Linux Resolve** (Metal-Resolve analogue), then async dispatch (drop
+   `cuStreamSynchronize`). No toolkit install was needed — the `corridorkey-cuda`
+   conda env's CUDA 12.1 wheels are reused (see [[flame-01-linux-testbed]]).
 3. ✅ Linux pixel-verification of the OFX in Linux Flame 2026.2.1 (`flame-01`) —
    loads + renders. Remaining: Linux Resolve load + a pixel-level EXR check.
 4. Load/verify the Matchbox node in Flame (GPU compile).
@@ -337,6 +369,16 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Session history (newest first)
 
+- GPU Phase 3 (render wiring): CUDA render path — `ExprCuda.h/.cpp` driver-API
+  bridge + `renderCuda()`/`describe()` in `Expression.cpp` (host-gated to Resolve)
+  + `WITH_CUDA=1` Makefile opt-in. Pixel path GPU-verified vs the CPU binding
+  (`test_cuda_render.cpp`: exact/~6e-8). CUDA-enabled Linux bundle builds + links +
+  resolves (nvrtc/libcuda). In-host (Linux Resolve) verify still pending.
+- GPU Phase 3 (runtime parity): `test_cuda_run.cpp` driver-API differential —
+  GPU-verified on `flame-01` (RTX 5000 Ada): deterministic 5.96e-08, value-noise
+  EXACTLY 0, random() 0.0039 (all better than Metal). Found `--fmad=false` is
+  required for noise parity. Reused the `corridorkey-cuda` conda env (CUDA 12.1
+  wheels) — no install.
 - Linux pixel-verification: OFX built natively on `flame-01` (RHEL 9.5, RTX 5000
   Ada) and loaded + rendered in Linux Flame 2026.2.1 (`tv.diff.Expression` in the
   OFX cache, clean instantiate, no errors). Native build needed for glibc compat.
