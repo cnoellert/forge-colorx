@@ -101,8 +101,8 @@ Functions GLSL lacks or names differently are **added** in the shader:
 | `clamp(x)` (1-arg)            | `clamp01(x)`                  | clamp to `[0,1]` |
 | `sinh cosh tanh`              | `sinh cosh tanh`              | defined (not built into 120) |
 | `ldexp exponent mantissa`     | same names                    | **approximate** (no `frexp` in GLSL) |
-| `noise(x,y,z)`                | `noise(x,y,z)`                | signed ~`[-1,1]`; **approximation** of Perlin (value noise) |
-| `random(x,y,z)`              | `random(x,y,z)`               | `[0,1]` hash |
+| `noise(x,y,z)`                | `noise(x,y,z)`                | signed ~`[-1,1]`; **classic Perlin** (Gustavson/Ashima, tableless) |
+| `random(x,y,z)`              | `random(x,y,z)`               | `[0,1)` tableless permute hash (cell-based) |
 | `fBm(x,y,z,oct,lac,gain)`     | `fBm(...)`                    |       |
 | `turbulence(x,y,z,oct,lac,gain)` | `turbulence(...)`          |       |
 | `from_sRGB to_sRGB`           | same names                    | standard sRGB EOTF/OETF |
@@ -115,8 +115,11 @@ Deviations worth remembering:
 - `clamp(x)` 1-arg → **`clamp01(x)`** (GLSL `clamp` needs 3 args).
 - `e` → **`e_()`**.
 - `min`/`max` are 2-argument in GLSL; for 3+ inputs nest them: `max(a,max(b,c))`.
-- `noise()` is a value-noise approximation (signed, smooth, centred near 0),
-  not a bit-exact match to Nuke's Perlin — close enough for grain/displacement.
+- `noise()` is **classic Perlin** gradient noise (Gustavson/Ashima `cnoise`,
+  tableless computable permutation), signed ~`[-1,1]`. It uses the identical
+  algorithm/constants as the OFX build, so the two tools match to float precision;
+  `random()` is a matching tableless permute hash. Not a bit-exact match to Nuke's
+  own Perlin permutation.
 
 ## Example expressions
 

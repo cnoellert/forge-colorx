@@ -40,41 +40,66 @@ enum FuncId {
     F_PI, F_E
 };
 
-// ---- noise helpers (match the Matchbox version for cross-tool parity) -------
-// Computed in FLOAT, not double, so the CPU evaluator renders identical noise to
-// the GPU back-ends (Metal/CUDA are float-only). value-noise uses only +,-,*,floor
-// (IEEE-exact -> bit-identical on any float hardware); random() uses sinf and so
-// keeps a tiny (~1e-3) cross-vendor ULP residual vs the GPU. The float helpers
-// here are mirrored verbatim by exh_* in ExprKernel.h (CPU transpile prelude) and
-// ExprKernelMetal.h (MSL); the differential tests guard the three against drift.
-inline float ev_fractf(float x) { return x - std::floor(x); }
-inline float ev_hash3f(float x, float y, float z) {
-    float px = ev_fractf(x * 0.3183099f + 0.1f) * 17.0f;
-    float py = ev_fractf(y * 0.3183099f + 0.1f) * 17.0f;
-    float pz = ev_fractf(z * 0.3183099f + 0.1f) * 17.0f;
-    return ev_fractf(px * py * pz * (px + py + pz));
-}
-inline float ev_vnoisef(float x, float y, float z) {
-    float ix = std::floor(x), iy = std::floor(y), iz = std::floor(z);
-    float fx = x - ix, fy = y - iy, fz = z - iz;
-    float ux = fx * fx * (3.0f - 2.0f * fx);
-    float uy = fy * fy * (3.0f - 2.0f * fy);
-    float uz = fz * fz * (3.0f - 2.0f * fz);
-    float c000 = ev_hash3f(ix,      iy,      iz),      c100 = ev_hash3f(ix+1.0f, iy,      iz);
-    float c010 = ev_hash3f(ix,      iy+1.0f, iz),      c110 = ev_hash3f(ix+1.0f, iy+1.0f, iz);
-    float c001 = ev_hash3f(ix,      iy,      iz+1.0f), c101 = ev_hash3f(ix+1.0f, iy,      iz+1.0f);
-    float c011 = ev_hash3f(ix,      iy+1.0f, iz+1.0f), c111 = ev_hash3f(ix+1.0f, iy+1.0f, iz+1.0f);
-    float x00 = c000 + (c100 - c000) * ux, x10 = c010 + (c110 - c010) * ux;
-    float x01 = c001 + (c101 - c001) * ux, x11 = c011 + (c111 - c011) * ux;
-    float y0 = x00 + (x10 - x00) * uy, y1 = x01 + (x11 - x01) * uy;
-    return y0 + (y1 - y0) * uz;
+// ---- noise helpers: classic Perlin (Gustavson/Ashima, tableless) ------------
+// Real gradient (Perlin) noise via a COMPUTABLE permutation, permute(x) =
+// mod289((34x+1)x) — no 256-entry table, so the identical float sequence ports
+// bit-for-bit to ExprKernel.h (CPU transpile), ExprKernelCuda.h and
+// ExprKernelMetal.h, and (in vec form) to ColorExpression.glsl. Computed in FLOAT
+// so the CPU oracle matches the float-only GPU back-ends. Every op is +,-,*,floor
+// with intermediates kept < 289 (float-exact) — NO transcendentals, so noise AND
+// random() are now cross-backend parity-clean (the old sinf random() gap is gone).
+// The differential tests guard the C-family copies against drift. (Output range is
+// Ashima's ~[-1,1]; this changed the noise values vs the old value-noise — PASSOFF
+// always noted noise is a swappable approximation.)
+inline float ev_fractf(float x)   { return x - std::floor(x); }
+inline float ev_pmod289(float x)  { return x - std::floor(x * (1.0f/289.0f)) * 289.0f; }
+inline float ev_ppermute(float x) { return ev_pmod289((x*34.0f + 1.0f) * x); }
+inline float ev_ptinv(float r)    { return 1.79284291400159f - 0.85373472095314f * r; }
+inline float ev_pfade(float t)    { return t*t*t*(t*(t*6.0f - 15.0f) + 10.0f); }
+inline float ev_pnoise3(float Px, float Py, float Pz) {
+    float i0x=std::floor(Px), i0y=std::floor(Py), i0z=std::floor(Pz);
+    float i1x=i0x+1.0f, i1y=i0y+1.0f, i1z=i0z+1.0f;
+    i0x=ev_pmod289(i0x); i0y=ev_pmod289(i0y); i0z=ev_pmod289(i0z);
+    i1x=ev_pmod289(i1x); i1y=ev_pmod289(i1y); i1z=ev_pmod289(i1z);
+    float f0x=Px-std::floor(Px), f0y=Py-std::floor(Py), f0z=Pz-std::floor(Pz);
+    float f1x=f0x-1.0f, f1y=f0y-1.0f, f1z=f0z-1.0f;
+    float ixL[4]={i0x,i1x,i0x,i1x}, iyL[4]={i0y,i0y,i1y,i1y};   // (0,0)(1,0)(0,1)(1,1)
+    float gx[8], gy[8], gz[8];
+    for (int L=0; L<4; ++L) {
+        float ixy = ev_ppermute(ev_ppermute(ixL[L]) + iyL[L]);
+        for (int zz=0; zz<2; ++zz) {                            // 0 = z0 plane, 1 = z1
+            float p = ev_ppermute(ixy + (zz==0 ? i0z : i1z));
+            float g  = p * (1.0f/7.0f);
+            float ggy = ev_fractf(std::floor(g) * (1.0f/7.0f)) - 0.5f;
+            float ggx = ev_fractf(g);
+            float ggz = 0.5f - std::fabs(ggx) - std::fabs(ggy);
+            float sz  = (ggz <= 0.0f) ? 1.0f : 0.0f;
+            ggx -= sz * ((ggx >= 0.0f ? 1.0f : 0.0f) - 0.5f);
+            ggy -= sz * ((ggy >= 0.0f ? 1.0f : 0.0f) - 0.5f);
+            int k = L + zz*4;  gx[k]=ggx; gy[k]=ggy; gz[k]=ggz;
+        }
+    }
+    for (int k=0;k<8;++k){ float n=ev_ptinv(gx[k]*gx[k]+gy[k]*gy[k]+gz[k]*gz[k]); gx[k]*=n; gy[k]*=n; gz[k]*=n; }
+    float n000=gx[0]*f0x+gy[0]*f0y+gz[0]*f0z, n100=gx[1]*f1x+gy[1]*f0y+gz[1]*f0z;
+    float n010=gx[2]*f0x+gy[2]*f1y+gz[2]*f0z, n110=gx[3]*f1x+gy[3]*f1y+gz[3]*f0z;
+    float n001=gx[4]*f0x+gy[4]*f0y+gz[4]*f1z, n101=gx[5]*f1x+gy[5]*f0y+gz[5]*f1z;
+    float n011=gx[6]*f0x+gy[6]*f1y+gz[6]*f1z, n111=gx[7]*f1x+gy[7]*f1y+gz[7]*f1z;
+    float wx=ev_pfade(f0x), wy=ev_pfade(f0y), wz=ev_pfade(f0z);
+    float nz0=n000+(n001-n000)*wz, nz1=n100+(n101-n100)*wz, nz2=n010+(n011-n010)*wz, nz3=n110+(n111-n110)*wz;
+    float ny0=nz0+(nz2-nz0)*wy, ny1=nz1+(nz3-nz1)*wy;
+    return 2.2f * (ny0 + (ny1-ny0)*wx);
 }
 inline double ev_noise(double x, double y, double z) {
-    return (double)(ev_vnoisef((float)x, (float)y, (float)z) * 2.0f - 1.0f);
+    return (double)ev_pnoise3((float)x, (float)y, (float)z);
 }
+// random(): tableless permute hash of the integer cell — float-only (GLSL-120
+// safe), parity-clean across all back-ends. Two permute rounds give 289*289
+// distinct values (no banding). Cell-based, so feed pixel coords for per-pixel.
 inline double ev_random(double x, double y, double z) {
-    float s = std::sin((float)x * 12.9898f + (float)y * 78.233f + (float)z * 37.719f) * 43758.5453f;
-    return (double)ev_fractf(s);
+    float a=ev_pmod289(std::floor((float)x)), b=ev_pmod289(std::floor((float)y)), c=ev_pmod289(std::floor((float)z));
+    float h1=ev_ppermute(ev_ppermute(ev_ppermute(a)+b)+c);
+    float h2=ev_ppermute(ev_ppermute(ev_ppermute(a+1.0f)+b)+c);
+    return (double)ev_fractf((h1*289.0f + h2) * (1.0f/83521.0f));
 }
 inline double ev_to_sRGB(double c)   { return (c <= 0.0031308) ? c * 12.92 : 1.055 * std::pow(c, 1.0/2.4) - 0.055; }
 inline double ev_from_sRGB(double c) { return (c <= 0.04045)   ? c / 12.92 : std::pow((c + 0.055)/1.055, 2.4); }
@@ -447,7 +472,7 @@ inline double Program::evalNode(int idx, const double* vars) const {
                     float x0 = (float)a0, y0 = (float)a1, z0 = (float)a2;
                     float sum = 0.0f, amp = 1.0f, fr = 1.0f;
                     for (int i = 0; i < oct && i < 32; ++i) {
-                        float v = ev_vnoisef(x0 * fr, y0 * fr, z0 * fr) * 2.0f - 1.0f;
+                        float v = ev_pnoise3(x0 * fr, y0 * fr, z0 * fr);
                         sum += amp * (n.fid == F_TURB ? std::fabs(v) : v);
                         fr *= lac; amp *= gain;
                     }

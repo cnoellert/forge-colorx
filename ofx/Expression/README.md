@@ -96,9 +96,12 @@ Notes / deliberate parity choices:
 - `clamp(x)` (1-arg) clamps to `[0,1]`; `clamp(x,a,b)` is the 3-arg form.
 - `min`/`max` are variadic (`max(r,g,b)` works).
 - `fmod` is C-style (sign of the dividend).
-- `noise()` is a smooth signed value-noise approximation (centred near 0),
-  matching the companion Matchbox shader for cross-tool consistency — not a
-  bit-exact match to Nuke's Perlin.
+- `noise()` is **classic Perlin** gradient noise (Gustavson/Ashima, tableless),
+  signed ~`[-1,1]`, matching the companion Matchbox shader for cross-tool
+  consistency. Computed in float with a computable permutation (no table) so it is
+  parity-clean across the CPU/CUDA/Metal back-ends; `random()` likewise uses a
+  tableless permute hash (cell-based — feed pixel coords for per-pixel values).
+  Not a bit-exact match to Nuke's own Perlin permutation.
 - An empty channel field evaluates to `0` (as in Nuke). The defaults are the
   identity (`r`/`g`/`b`/`a`), i.e. a pass-through.
 - A syntax error is reported on the node (persistent error message) naming the

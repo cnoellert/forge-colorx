@@ -261,23 +261,22 @@ CPU evaluator is the **numeric oracle** for every target.
        spec once the path is confirmed.
      - Throwaway state left behind: Resolve project **`FCX_METAL_TEST`** (timeline
        `FCX_METAL_TL` + a Fusion comp) and `/tmp/fcx_metal*.exr`. Safe to delete.
-  - **Noise parity (resolved for value-noise; `random()` caveated).** The noise
-    sub-library is now computed in **float on every target** (`ev_*f` in
-    `ExprEval.h`, `exh_*` in `ExprKernel.h` + `ExprKernelMetal.h`), so the CPU
-    render and the GPU render produce the same noise. value-noise is `+,-,*,floor`
-    only → IEEE-exact and bit-identical:
-      - `noise/fBm/turbulence` on centred coords (`cx,cy`): **0/5000** samples
-        differ >1e-2 — full parity.
-      - `noise()` on large coords (e.g. `x*0.1`): ~**5/5000** differ, isolated
-        grid-line straddles where float `floor` lands a cell apart — same class
-        as the deterministic floor/step boundary behaviour, not a bug.
-      - `random()`: still ~**20%** of samples diverge. Its hash feeds `sin` huge
-        arguments (`x*12.9898+…` → ~1e5) whose range reduction differs by vendor;
-        float precision can't fix this. The only true fix is replacing `random()`
-        with an **integer-bit hash** across all back-ends (deferred — would change
-        random values and also touch the Matchbox GLSL). Treat GPU `random()` as
-        not pixel-matching the CPU until then. (This changed the CPU noise values
-        slightly vs the old double path; PASSOFF always noted noise is swappable.)
+  - **Noise parity — FULLY RESOLVED (incl. `random()`) by the classic-Perlin swap.**
+    The value-noise + `sinf` random were replaced by **classic Perlin** (Ashima
+    `cnoise`, tableless permutation) + a tableless **permute** `random()` across all
+    five back-ends — one scalar float sequence in the OFX C-family (`ev_p*`/`exh_p*`),
+    Ashima's vec form in the GLSL. Because the permute hash is float `+,-,*,floor`
+    only (intermediates < 289, float-exact) with **no transcendental**, the old
+    `random()` ~20% divergence is gone. Verified:
+      - **CPU↔CUDA** (`test_cuda_run`, `--fmad=false`): noise/`random`/fBm/turbulence
+        all **worst err 0** — bit-exact.
+      - **CPU↔Metal** (`test_metal`): `random` **worst 0** (bit-exact); noise/fBm/
+        turbulence ~**3e-5** worst, **0/5000** differ >1e-2 (Metal fast-math in the
+        gradient dots; visually identical). Up from the old ~5/5000 material misses.
+      - **CPU eval↔transpile** (`test_transpile`): 2.22e-16.
+      - **GLSL**: `shader_builder` exit 0 (Matchbox Perlin compiles).
+    (The swap changed noise AND random output values vs the old approximation;
+    always noted as swappable.)
 - **Phase 3 — CUDA (foundation ✅; runtime + render wiring ⏭):**
   1. ✅ `ExprKernelCuda.h` — the `exh_*` helper library in CUDA C device code
      (`__device__`; value-noise float-exact via `floorf`/`sinf`/`f`-literals so CUDA
@@ -358,10 +357,16 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
   library in GLSL and puts the four channel formulas in an editable source
   block (recompile to apply), with `k1..k4`/`ref` knobs for live tweaks. The
   **OFX** build is where typed-at-runtime expressions actually happen.
-- **`noise()` is a smooth signed value-noise approximation** (centred near 0),
-  deliberately identical between the two builds for cross-tool parity. It is not
-  bit-exact to Nuke's Perlin. If exactness matters, swap in a real Perlin/Simplex
-  in both `ExprEval.h` (`ev_noise`) and `ColorExpression.glsl` (`noise`).
+- **`noise()` is classic Perlin gradient noise** (Gustavson/Ashima `cnoise`,
+  tableless computable permutation `permute(x)=mod289((34x+1)x)`), signed ~`[-1,1]`,
+  deliberately identical across all builds. The OFX C-family (`ev_p*` in
+  `ExprEval.h`, `exh_p*` in `ExprKernel.h`/`ExprKernelCuda.h`/`ExprKernelMetal.h`)
+  uses one scalar float sequence → bit-exact CPU↔CUDA, float-precision on Metal;
+  the Matchbox GLSL uses Ashima's vec form (matches to float precision). `random()`
+  is a matching tableless permute hash (cell-based, `[0,1)`) — replaced the old
+  `sinf` hash, which is why random() is now parity-clean too. Not bit-exact to
+  Nuke's own Perlin permutation. (Swapping noise changed its output values vs the
+  old value-noise — always noted as swappable.)
 - **Coordinate parity with Nuke:** origin bottom-left for `x,y`; `cx,cy` are
   centred and aspect-preserved (divide both by half-width).
 - **Channel normalisation (OFX):** byte/short clips are scaled to 0..1 in and
@@ -371,24 +376,33 @@ Resolve supports OFX Metal (Mac) + CUDA (Linux); test there with the harness in
 
 ## Suggested next steps (in priority order)
 
-1. **GPU Phase 2 — Metal back-end.** Foundation done (MSL prelude + GPU-verified
-   diff test). NEXT: wire the per-pixel Metal kernel into `Expression.cpp render()`
-   behind `args.isEnabledMetalRender` with a CPU fallback, then EXR-diff vs CPU in
-   Resolve on this Mac. Decide the noise/random float-parity question first (see
-   the KNOWN PARITY GAP note) — it affects whether GPU noise matches CPU noise.
-2. ✅ **GPU Phase 3 — CUDA**: runtime parity + render wiring DONE and GPU-verified
-   on `flame-01` (RTX 5000 Ada). Remaining: in-host verify the CUDA render path in
-   **Linux Resolve** (Metal-Resolve analogue), then async dispatch (drop
-   `cuStreamSynchronize`). No toolkit install was needed — the `corridorkey-cuda`
-   conda env's CUDA 12.1 wheels are reused (see [[flame-01-linux-testbed]]).
-3. ✅ Linux pixel-verification of the OFX in Linux Flame 2026.2.1 (`flame-01`) —
+1. ✅ **GPU Phase 2 — Metal back-end.** Done + dual-host verified (Resolve drives
+   the Metal kernel; Flame host-gated to CPU, no crash).
+2. ✅ **GPU Phase 3 — CUDA**: runtime parity + render wiring + async dispatch DONE
+   and GPU-verified on `flame-01` (RTX 5000 Ada); Flame CPU-load safety check done.
+   Remaining: in-host verify the CUDA render path in **Linux Resolve Studio**
+   (Metal-Resolve analogue; user is arranging a Resolve install). No toolkit install
+   needed — the `corridorkey-cuda` conda env's CUDA 12.1 wheels are reused
+   (see [[flame-01-linux-testbed]]).
+3. ✅ **Real Perlin (all builds).** Classic Perlin (Ashima `cnoise`) + tableless
+   permute `random()` across CPU/CUDA/Metal/GLSL — parity-verified (CPU↔CUDA bit-
+   exact incl. random; Metal float-precision; GLSL compiles). Closed the old
+   random() parity gap.
+4. ✅ Linux pixel-verification of the OFX in Linux Flame 2026.2.1 (`flame-01`) —
    loads + renders. Remaining: Linux Resolve load + a pixel-level EXR check.
-4. Load/verify the Matchbox node in Flame (GPU compile).
-5. Nice-to-haves: user-constant params (`k1..k4`/`ref`) in the OFX UI; real
-   Perlin (both builds); universal macOS build; tag **v1.0**.
+5. Open: load/verify the **Matchbox node in Flame** (GPU compile — `shader_builder`
+   accepts it but it hasn't run as a node); user-constant params (`k1..k4`/`ref`) in
+   the OFX UI; universal macOS build; tag **v1.0**.
 
 ## Session history (newest first)
 
+- Real Perlin (all builds): replaced value-noise + `sinf` random with classic Perlin
+  (Ashima `cnoise`, tableless permutation) + a tableless permute `random()` across
+  CPU eval, CPU transpile, CUDA, Metal, and the Matchbox GLSL. Parity verified:
+  CPU↔CUDA bit-exact (noise/random/fBm/turb worst 0), Metal random bit-exact + noise
+  ~3e-5 (0/5000 material), CPU eval↔transpile 2.22e-16, GLSL `shader_builder` exit 0.
+  Closed the long-standing `random()` cross-vendor gap. Noise/random output values
+  changed (swap was always noted as allowed).
 - GPU Phase 3 (async dispatch + clean install): `cudaRender()` now enqueues on the
   host stream and returns without synchronizing (OFX-CUDA contract); pixel test syncs
   its own stream and still matches the CPU binding. Clean (no-marker) WITH_CUDA bundle

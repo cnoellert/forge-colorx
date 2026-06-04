@@ -32,46 +32,64 @@ static inline double exh_smoothstep(double a, double b, double x) {
     double t = (x - a) / (b - a); t = t < 0 ? 0 : (t > 1 ? 1 : t); return t * t * (3 - 2 * t);
 }
 
-// --- value noise / random (must match ev_* in ExprEval.h bit-for-bit) --------
-// Computed in FLOAT (not double): the GPU back-ends are float-only, so the noise
-// sub-library is float on every target to render identical noise on CPU and GPU.
-// value-noise is +,-,*,floor only -> IEEE-exact and bit-identical; random() uses
-// sinf (a tiny cross-vendor ULP residual vs the GPU). Mirrors ev_*f in ExprEval.h
-// and exh_* in ExprKernelMetal.h; the differential tests guard against drift.
-static inline float exh_fractf(float x) { return x - floorf(x); }
-static inline float exh_hash3f(float x, float y, float z) {
-    float px = exh_fractf(x * 0.3183099f + 0.1f) * 17.0f;
-    float py = exh_fractf(y * 0.3183099f + 0.1f) * 17.0f;
-    float pz = exh_fractf(z * 0.3183099f + 0.1f) * 17.0f;
-    return exh_fractf(px * py * pz * (px + py + pz));
-}
-static inline float exh_vnoisef(float x, float y, float z) {
-    float ix = floorf(x), iy = floorf(y), iz = floorf(z);
-    float fx = x - ix, fy = y - iy, fz = z - iz;
-    float ux = fx * fx * (3.0f - 2.0f * fx);
-    float uy = fy * fy * (3.0f - 2.0f * fy);
-    float uz = fz * fz * (3.0f - 2.0f * fz);
-    float c000 = exh_hash3f(ix,      iy,      iz),      c100 = exh_hash3f(ix+1.0f, iy,      iz);
-    float c010 = exh_hash3f(ix,      iy+1.0f, iz),      c110 = exh_hash3f(ix+1.0f, iy+1.0f, iz);
-    float c001 = exh_hash3f(ix,      iy,      iz+1.0f), c101 = exh_hash3f(ix+1.0f, iy,      iz+1.0f);
-    float c011 = exh_hash3f(ix,      iy+1.0f, iz+1.0f), c111 = exh_hash3f(ix+1.0f, iy+1.0f, iz+1.0f);
-    float x00 = c000 + (c100 - c000) * ux, x10 = c010 + (c110 - c010) * ux;
-    float x01 = c001 + (c101 - c001) * ux, x11 = c011 + (c111 - c011) * ux;
-    float y0 = x00 + (x10 - x00) * uy, y1 = x01 + (x11 - x01) * uy;
-    return y0 + (y1 - y0) * uz;
+// --- noise / random: classic Perlin (Gustavson/Ashima, tableless) ------------
+// Must match ev_* in ExprEval.h bit-for-bit. Real gradient (Perlin) noise via a
+// computable permutation (no table), all float +,-,*,floor (intermediates < 289,
+// float-exact) -> noise AND random() are cross-backend parity-clean. Mirrors
+// ev_p* in ExprEval.h and the exh_* preludes in ExprKernelCuda.h / ExprKernelMetal.h;
+// the differential tests guard against drift.
+static inline float exh_fractf(float x)   { return x - floorf(x); }
+static inline float exh_pmod289(float x)  { return x - floorf(x * (1.0f/289.0f)) * 289.0f; }
+static inline float exh_ppermute(float x) { return exh_pmod289((x*34.0f + 1.0f) * x); }
+static inline float exh_ptinv(float r)    { return 1.79284291400159f - 0.85373472095314f * r; }
+static inline float exh_pfade(float t)    { return t*t*t*(t*(t*6.0f - 15.0f) + 10.0f); }
+static inline float exh_pnoise3(float Px, float Py, float Pz) {
+    float i0x=floorf(Px), i0y=floorf(Py), i0z=floorf(Pz);
+    float i1x=i0x+1.0f, i1y=i0y+1.0f, i1z=i0z+1.0f;
+    i0x=exh_pmod289(i0x); i0y=exh_pmod289(i0y); i0z=exh_pmod289(i0z);
+    i1x=exh_pmod289(i1x); i1y=exh_pmod289(i1y); i1z=exh_pmod289(i1z);
+    float f0x=Px-floorf(Px), f0y=Py-floorf(Py), f0z=Pz-floorf(Pz);
+    float f1x=f0x-1.0f, f1y=f0y-1.0f, f1z=f0z-1.0f;
+    float ixL[4]={i0x,i1x,i0x,i1x}, iyL[4]={i0y,i0y,i1y,i1y};
+    float gx[8], gy[8], gz[8];
+    for (int L=0; L<4; ++L) {
+        float ixy = exh_ppermute(exh_ppermute(ixL[L]) + iyL[L]);
+        for (int zz=0; zz<2; ++zz) {
+            float p = exh_ppermute(ixy + (zz==0 ? i0z : i1z));
+            float g  = p * (1.0f/7.0f);
+            float ggy = exh_fractf(floorf(g) * (1.0f/7.0f)) - 0.5f;
+            float ggx = exh_fractf(g);
+            float ggz = 0.5f - fabsf(ggx) - fabsf(ggy);
+            float sz  = (ggz <= 0.0f) ? 1.0f : 0.0f;
+            ggx -= sz * ((ggx >= 0.0f ? 1.0f : 0.0f) - 0.5f);
+            ggy -= sz * ((ggy >= 0.0f ? 1.0f : 0.0f) - 0.5f);
+            int k = L + zz*4;  gx[k]=ggx; gy[k]=ggy; gz[k]=ggz;
+        }
+    }
+    for (int k=0;k<8;++k){ float n=exh_ptinv(gx[k]*gx[k]+gy[k]*gy[k]+gz[k]*gz[k]); gx[k]*=n; gy[k]*=n; gz[k]*=n; }
+    float n000=gx[0]*f0x+gy[0]*f0y+gz[0]*f0z, n100=gx[1]*f1x+gy[1]*f0y+gz[1]*f0z;
+    float n010=gx[2]*f0x+gy[2]*f1y+gz[2]*f0z, n110=gx[3]*f1x+gy[3]*f1y+gz[3]*f0z;
+    float n001=gx[4]*f0x+gy[4]*f0y+gz[4]*f1z, n101=gx[5]*f1x+gy[5]*f0y+gz[5]*f1z;
+    float n011=gx[6]*f0x+gy[6]*f1y+gz[6]*f1z, n111=gx[7]*f1x+gy[7]*f1y+gz[7]*f1z;
+    float wx=exh_pfade(f0x), wy=exh_pfade(f0y), wz=exh_pfade(f0z);
+    float nz0=n000+(n001-n000)*wz, nz1=n100+(n101-n100)*wz, nz2=n010+(n011-n010)*wz, nz3=n110+(n111-n110)*wz;
+    float ny0=nz0+(nz2-nz0)*wy, ny1=nz1+(nz3-nz1)*wy;
+    return 2.2f * (ny0 + (ny1-ny0)*wx);
 }
 static inline double exh_noise(double x, double y, double z) {
-    return (double)(exh_vnoisef((float)x, (float)y, (float)z) * 2.0f - 1.0f);
+    return (double)exh_pnoise3((float)x, (float)y, (float)z);
 }
 static inline double exh_random(double x, double y, double z) {
-    float s = sinf((float)x * 12.9898f + (float)y * 78.233f + (float)z * 37.719f) * 43758.5453f;
-    return (double)exh_fractf(s);
+    float a=exh_pmod289(floorf((float)x)), b=exh_pmod289(floorf((float)y)), c=exh_pmod289(floorf((float)z));
+    float h1=exh_ppermute(exh_ppermute(exh_ppermute(a)+b)+c);
+    float h2=exh_ppermute(exh_ppermute(exh_ppermute(a+1.0f)+b)+c);
+    return (double)exh_fractf((h1*289.0f + h2) * (1.0f/83521.0f));
 }
 static inline double exh_fbm(double x, double y, double z, double oct, double lac, double gain) {
     int o = (int)oct; float sum = 0.0f, amp = 1.0f, fr = 1.0f;
     float fx = (float)x, fy = (float)y, fz = (float)z, fl = (float)lac, fg = (float)gain;
     for (int i = 0; i < o && i < 32; ++i) {
-        sum += amp * (exh_vnoisef(fx*fr, fy*fr, fz*fr) * 2.0f - 1.0f); fr *= fl; amp *= fg;
+        sum += amp * exh_pnoise3(fx*fr, fy*fr, fz*fr); fr *= fl; amp *= fg;
     }
     return (double)sum;
 }
@@ -79,7 +97,7 @@ static inline double exh_turb(double x, double y, double z, double oct, double l
     int o = (int)oct; float sum = 0.0f, amp = 1.0f, fr = 1.0f;
     float fx = (float)x, fy = (float)y, fz = (float)z, fl = (float)lac, fg = (float)gain;
     for (int i = 0; i < o && i < 32; ++i) {
-        sum += amp * fabsf(exh_vnoisef(fx*fr, fy*fr, fz*fr) * 2.0f - 1.0f); fr *= fl; amp *= fg;
+        sum += amp * fabsf(exh_pnoise3(fx*fr, fy*fr, fz*fr)); fr *= fl; amp *= fg;
     }
     return (double)sum;
 }
