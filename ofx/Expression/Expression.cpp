@@ -55,6 +55,29 @@ static bool hostDrivesMetalSafely()
 }
 #endif
 
+// CUDA GPU render path (Linux only — the Makefile defines HAVE_CUDA and links
+// nvrtc/cuda when built WITH_CUDA=1). Pure-C++ bridge; see ExprCuda.h.
+#ifdef HAVE_CUDA
+#include "ExprKernelCuda.h"
+#include "ExprCuda.h"
+#include <utility>
+
+// OFX-CUDA is HOST-SPECIFIC, exactly like OFX-Metal. We only advertise it and take
+// the GPU path on hosts verified to drive OFX-CUDA correctly — DaVinci Resolve on
+// Linux drives OFX-CUDA (hands us device buffers + a stream). Autodesk Flame's OFX
+// host is CPU-leaning, so gating to Resolve keeps Flame (and any unverified host)
+// safely on the CPU path — the same protection hostDrivesMetalSafely() gives on
+// macOS. Expand the allow-list only after verifying a host end-to-end.
+static bool hostDrivesCudaSafely()
+{
+    try {
+        OFX::ImageEffectHostDescription* h = OFX::getImageEffectHostDescription();
+        if (h && h->hostName.find("Resolve") != std::string::npos) return true; // "DaVinciResolve"
+    } catch (...) {}
+    return false;
+}
+#endif
+
 // Opt-in render-path diagnostic (off in normal + CI builds). Build with
 // -DEXPR_PATH_LOG to record, per render, the OFX host name, whether the host
 // enabled Metal, and which branch actually executed — to confirm whether a given
@@ -74,9 +97,23 @@ static void exprPathLog(int metalEnabled, const char* branch)
     std::fprintf(f, "host=%s metalEnabled=%d branch=%s\n", host, metalEnabled, branch);
     std::fclose(f);
 }
+static void exprPathLogCuda(int cudaEnabled, const char* branch)
+{
+    const char* host = "?";
+    try {
+        OFX::ImageEffectHostDescription* h = OFX::getImageEffectHostDescription();
+        if (h) host = h->hostName.c_str();
+    } catch (...) {}
+    FILE* f = std::fopen("/tmp/expr_path.log", "a");
+    if (!f) return;
+    std::fprintf(f, "host=%s cudaEnabled=%d branch=%s\n", host, cudaEnabled, branch);
+    std::fclose(f);
+}
 #define EXPR_PATHLOG(me, br) exprPathLog((me), (br))
+#define EXPR_PATHLOG_CUDA(ce, br) exprPathLogCuda((ce), (br))
 #else
 #define EXPR_PATHLOG(me, br) ((void)0)
+#define EXPR_PATHLOG_CUDA(ce, br) ((void)0)
 #endif
 
 // ---- IEEE-754 half <-> float (Fusion/Resolve deliver 16-bit float images) ----
@@ -270,6 +307,11 @@ private:
     // isn't giving float Metal buffers or anything goes wrong.
     bool renderMetal(const OFX::RenderArguments& args, const ExprContext& ctx);
 #endif
+#ifdef HAVE_CUDA
+    // GPU render via CUDA. Returns false (caller falls back to CPU) if the host
+    // isn't giving float device buffers or anything goes wrong.
+    bool renderCuda(const OFX::RenderArguments& args, const ExprContext& ctx);
+#endif
 
     OFX::Clip*        _dstClip;
     OFX::Clip*        _srcClip;
@@ -411,6 +453,61 @@ bool ExpressionPlugin::renderMetal(const OFX::RenderArguments& args, const ExprC
 }
 #endif // HAVE_METAL
 
+#ifdef HAVE_CUDA
+bool ExpressionPlugin::renderCuda(const OFX::RenderArguments& args, const ExprContext& ctx)
+{
+    // GPU path is float-only (Resolve's CUDA render delivers float device buffers).
+    if (_dstClip->getPixelDepth() != OFX::eBitDepthFloat) return false;
+
+    OFX::PixelComponentEnum comps = _dstClip->getPixelComponents();
+    int nComps = (comps == OFX::ePixelComponentRGBA)  ? 4
+               : (comps == OFX::ePixelComponentRGB)   ? 3
+               : (comps == OFX::ePixelComponentAlpha) ? 1 : 0;
+    if (nComps == 0) return false;
+
+    // Transpile the compiled programs to one CUDA kernel for this expression set.
+    std::string chan[4] = { ctx.chan[0].emitC(), ctx.chan[1].emitC(),
+                            ctx.chan[2].emitC(), ctx.chan[3].emitC() };
+    std::vector<std::pair<int, std::string> > temps;
+    for (int t = 0; t < kNumTemps; ++t)
+        if (ctx.tempSlot[t] >= 0)
+            temps.push_back(std::make_pair(ctx.tempSlot[t], ctx.temps[t].emitC()));
+    std::string cu = expreval::buildCudaPixelKernel(chan, temps, ctx.nVars);
+
+    std::unique_ptr<OFX::Image> dst(_dstClip->fetchImage(args.time));
+    if (!dst.get()) return false;
+    std::unique_ptr<OFX::Image> src(_srcClip && _srcClip->isConnected()
+                                  ? _srcClip->fetchImage(args.time) : 0);
+
+    expreval::CudaImageDesc dd, sd;
+    OfxRectI db = dst->getBounds();
+    dd.buffer = dst->getPixelData();
+    dd.x1 = db.x1; dd.y1 = db.y1;
+    dd.rowFloats = dst->getRowBytes() / (int)sizeof(float);
+    if (!dd.buffer) return false;
+
+    int hasSrc = 0;
+    if (src.get()) {
+        OfxRectI sb = src->getBounds();
+        sd.buffer = src->getPixelData();
+        sd.x1 = sb.x1; sd.y1 = sb.y1;
+        sd.rowFloats = src->getRowBytes() / (int)sizeof(float);
+        hasSrc = (sd.buffer != 0) ? 1 : 0;
+    }
+
+    std::string err;
+    bool ok = expreval::cudaRender(
+        args.pCudaStream, sd, hasSrc, dd,
+        args.renderWindow.x1, args.renderWindow.y1,
+        args.renderWindow.x2, args.renderWindow.y2,
+        nComps, (float)ctx.width, (float)ctx.height, (float)ctx.frame,
+        cu, err);
+    if (!ok) { try { setPersistentMessage(OFX::Message::eMessageError, "",
+                       "CUDA render failed (CPU fallback): " + err); } catch (...) {} }
+    return ok;
+}
+#endif // HAVE_CUDA
+
 void ExpressionPlugin::render(const OFX::RenderArguments& args)
 {
     ExprContext ctx;
@@ -429,6 +526,19 @@ void ExpressionPlugin::render(const OFX::RenderArguments& args)
     }
 #else
     EXPR_PATHLOG(0, "cpu-no-haveMetal");
+#endif
+
+#ifdef HAVE_CUDA
+    // Same shape as the Metal branch: prefer the GPU only on a verified host
+    // (hostDrivesCudaSafely) actually driving a CUDA render; otherwise CPU. The
+    // host gate keeps CPU-leaning hosts (Flame) safely off the CUDA path.
+    if (hostDrivesCudaSafely() && args.isEnabledCudaRender && args.pCudaStream) {
+        bool gpu = renderCuda(args, ctx);
+        EXPR_PATHLOG_CUDA(1, gpu ? "cuda" : "cuda-failed->cpu");
+        if (gpu) return;
+    } else {
+        EXPR_PATHLOG_CUDA(args.isEnabledCudaRender ? 1 : 0, "cpu");
+    }
 #endif
 
     OFX::BitDepthEnum       depth = _dstClip->getPixelDepth();
@@ -507,6 +617,14 @@ void ExpressionPluginFactory::describe(OFX::ImageEffectDescriptor& desc)
     // we must not advertise Metal to it. Verified hosts then MAY hand us float
     // MTLBuffers + a command queue at render (we fall back to CPU if they don't).
     if (hostDrivesMetalSafely()) { try { desc.setSupportsMetalRender(true); } catch (...) {} }
+#endif
+
+#ifdef HAVE_CUDA
+    // Advertise CUDA render ONLY to verified hosts (see hostDrivesCudaSafely) —
+    // Resolve on Linux drives OFX-CUDA; CPU-leaning hosts must not be offered it.
+    // Verified hosts then MAY hand us float device buffers + a stream at render
+    // (we fall back to CPU if they don't).
+    if (hostDrivesCudaSafely()) { try { desc.setSupportsCudaRender(true); } catch (...) {} }
 #endif
 }
 

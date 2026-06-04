@@ -98,6 +98,12 @@ jobs:
             tests/test_cuda_run.cpp -o test_cuda_run \
             -L"$NVRTC_L" -lnvrtc -L"$CUDA_STUB" -lcuda
           echo "test_cuda_run linked OK (driver API); runtime run happens on the GPU box"
+          # Also compile-link the production render bridge (ExprCuda.cpp) + the
+          # pixel-path test, so CI gates the bridge code that renderCuda() calls.
+          c++ -std=c++11 -O2 -I ofx/Expression -I"$NVRTC_H" -I"$CUDA_H" \
+            tests/test_cuda_render.cpp ofx/Expression/ExprCuda.cpp -o test_cuda_render \
+            -L"$NVRTC_L" -lnvrtc -L"$CUDA_STUB" -lcuda
+          echo "test_cuda_render + ExprCuda.cpp linked OK (production bridge); GPU run on the box"
 
   build:
     name: build ${{ matrix.name }}

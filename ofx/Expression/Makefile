@@ -27,6 +27,25 @@ ifeq ($(shell uname -s),Darwin)
   LDFLAGS_ADD   += -framework Metal -framework Foundation
 endif
 
+# On Linux, the CUDA GPU render path is OPT-IN (a default Linux build stays
+# CPU-only, so the CI Linux bundle is unchanged). Build WITH_CUDA=1 on a box with
+# a CUDA toolkit, passing the include/lib flags for that toolkit — the headers may
+# live in a non-standard place (e.g. conda CUDA wheels), so they are overridable:
+#
+#   make WITH_CUDA=1 \
+#     CUDA_INC='-I<nvrtc/include> -I<cuda_runtime/include>' \
+#     CUDA_LIB='-L<nvrtc/lib> -l:libnvrtc.so.12 -lcuda -Wl,-rpath,<nvrtc/lib>'
+#
+# (-lcuda is the real driver from the system; libnvrtc may be versioned-only, hence
+#  the -l:libnvrtc.so.12 form. CUDA_INC/CUDA_LIB default to a standard toolkit.)
+CUDA_INC ?= -I/usr/local/cuda/include
+CUDA_LIB ?= -L/usr/local/cuda/lib64 -lnvrtc -lcuda
+ifeq ($(WITH_CUDA),1)
+  PLUGINOBJECTS += ExprCuda.o
+  CXXFLAGS_ADD  += -DHAVE_CUDA $(CUDA_INC)
+  LDFLAGS_ADD   += $(CUDA_LIB)
+endif
+
 # Anything in this list is copied into Contents/Resources of the bundle.
 RESOURCES =
 
@@ -42,5 +61,6 @@ $(OBJECTPATH)/%.o : %.mm
 
 # Header-only deps: rebuild objects when the shared headers change. (Prefixed
 # with $(OBJECTPATH) so they attach to the real targets built by the pattern rule.)
-$(OBJECTPATH)/Expression.o: Expression.cpp ExprEval.h ExprKernel.h ExprKernelMetal.h ExprMetal.h
+$(OBJECTPATH)/Expression.o: Expression.cpp ExprEval.h ExprKernel.h ExprKernelMetal.h ExprMetal.h ExprKernelCuda.h ExprCuda.h
 $(OBJECTPATH)/ExprMetal.o:  ExprMetal.mm ExprMetal.h ExprKernelMetal.h
+$(OBJECTPATH)/ExprCuda.o:   ExprCuda.cpp ExprCuda.h ExprKernelCuda.h
