@@ -20,7 +20,7 @@ Expression/
 |---|---|---|
 | Per-channel **typed** expressions, live | No (compiled GLSL, no text field) | **Yes** |
 | Runs on | Flame family | Flame + every OFX host |
-| Execution | GPU | CPU (multithreaded) |
+| Execution | GPU | CPU (multithreaded) + GPU on verified hosts (Metal/CUDA) |
 | Install | drop files | build per platform, drop `.ofx.bundle` |
 
 The Matchbox version (separate deliverable) stays useful when you want GPU speed
@@ -68,10 +68,36 @@ The UI is split into four pages:
   a friendly token. Name `k1` "gamma" and both `gamma` and `k1` resolve to that
   slider. (These stay as separate boxes because the labelled `k` slider anchors the
   alias box next to it.)
-- **Output** — **Mix** (blend original↔result) and **Clamp Output**.
+- **Output** — **Mix** (blend original↔result), **Clamp Output**, and the **Preset**
+  pulldown (a one-pick effect gallery — see [Presets](#presets) below).
 
 Two kinds of named token: a **Variable** is *computed* (name + formula, in the block),
 a **Constant** is *dialed* (name + slider). Both are usable anywhere in the channels.
+
+### Presets
+
+At the foot of the **Output** page is a **Preset** pulldown — a one-pick effect
+gallery. Choosing an entry stamps a whole effect into the node at once: the four
+channel expressions, the Variables block, **and** the suggested `k1..k4` knob values
+(e.g. **Checkerboard** sets `k1 = 32`; **Gamma** sets `k1 = 2.2`). The entries mirror
+[`PRESETS.md`](../../PRESETS.md) — UV pass, cosine-palette rainbow, checkerboard,
+plasma, Perlin clouds/marble, duotone, posterize, film grain, scanlines, and more.
+
+It's a starting point, not a mode. Once a preset is loaded every field stays fully
+editable, and the knobs are meant to be dialed live (that's why each preset documents
+what its `kN` control). Hand-edit any channel or the Variables block and the pulldown
+snaps back to **(Custom)** — an honest signal that you've diverged from the preset.
+Tweaking a knob does *not* snap it: dialing `k1` is *using* the preset, not leaving it.
+
+Verified live in **Flame 2026.2.2** (Apple Silicon) and **DaVinci Resolve 20.3.1.6**:
+picking a preset rewrites the channel/vars/knob fields in both hosts.
+
+**Adding a preset:** add one row to the `kPresets[]` table in `Expression.cpp` — the
+pulldown label, the four channel strings, the Variables string (`""` to clear it), and
+`setK` plus `k1..k4` — then add the matching documented entry to `PRESETS.md`. The two
+are kept in sync by design: the table feeds the pulldown, `PRESETS.md` is the human
+reference. (The pulldown is driven by the node's `changedParam` callback, which also
+implements the snap-to-`(Custom)` behaviour.)
 
 ### Predefined variables
 
@@ -152,8 +178,15 @@ values.
 
 ## Performance
 
-Evaluation is CPU, multithreaded across scanlines via the OFX MultiThread suite,
-and each expression is compiled to an AST once per render rather than re-parsed
-per pixel. That's plenty for interactive grading-style use. If you later need 4K
-real-time, the path would be to transpile the AST to GLSL — but that's an
-optimization, not required for a faithful clone.
+The CPU path is multithreaded across scanlines via the OFX MultiThread suite, and
+each expression is compiled to an AST once per render rather than re-parsed per
+pixel — plenty for interactive grading-style use.
+
+On verified hosts the same expression also runs on the **GPU**, transpiled from the
+AST: a **Metal** path (advertised to DaVinci Resolve, where it is pixel-verified)
+and an opt-in **CUDA** path (Linux, built `make WITH_CUDA=1`). Every other host —
+including Flame, whose macOS OFX host is deliberately kept off the Metal path because
+it crashes on a Metal-advertising node — uses the CPU path. The GPU and CPU
+back-ends share one tableless noise/permutation implementation, so `noise()`,
+`fBm()`, `turbulence()` and `random()` match across all three (NVRTC builds pass
+`--fmad=false` to hold that parity).
