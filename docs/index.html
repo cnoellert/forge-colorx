@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Expression — forge-colorx reference</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2316181e'/%3E%3Crect x='6' y='6' width='20' height='20' rx='5' fill='%23e87e24'/%3E%3C/svg%3E">
+<meta name="description" content="Reference manual for the Expression OpenFX node — a re-creation of Nuke's Color > Math > Expression. Variables, operators, the function library, and the preset gallery.">
+<style>
+  :root{
+    --bg:#16181e; --panel:#1e2028; --panel2:#23262f; --surface:#282c34;
+    --border:#3a3f4f; --border-soft:#2e3240; --hover:#4a5060;
+    --accent:#e87e24; --accent-hi:#f59035; --sel:#2d4f7a;
+    --green:#1a6600; --green-soft:#8fbc8f;
+    --text:#cccccc; --text-strong:#ececec; --muted:#8a8f9c;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --sidebar:248px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:var(--sans); font-size:15px; line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent); text-decoration:none}
+  a:hover{color:var(--accent-hi); text-decoration:underline}
+  code{font-family:var(--mono); font-size:.88em; color:#f0d7b8;
+    background:var(--panel2); padding:.12em .4em; border-radius:4px; border:1px solid var(--border-soft)}
+  h2 code,h3 code,td code{background:transparent;border:none;padding:0;color:#f0c89a}
+
+  /* ---- layout ---- */
+  .wrap{display:flex; min-height:100vh}
+  nav.side{
+    width:var(--sidebar); flex:0 0 var(--sidebar); position:sticky; top:0; align-self:flex-start;
+    height:100vh; overflow-y:auto; background:var(--surface);
+    border-right:1px solid var(--border); padding:22px 0;
+  }
+  nav.side .brand{padding:0 22px 18px; border-bottom:1px solid var(--border-soft); margin-bottom:12px}
+  nav.side .brand .logo{display:flex; align-items:center; gap:10px}
+  nav.side .brand .dot{width:11px;height:11px;border-radius:3px;background:var(--accent);
+    box-shadow:0 0 12px rgba(232,126,36,.6)}
+  nav.side .brand h1{font-size:17px; margin:0; color:var(--text-strong); letter-spacing:.3px}
+  nav.side .brand .sub{font-size:11.5px; color:var(--muted); margin-top:3px; font-family:var(--mono)}
+  nav.side a.nl{display:block; padding:6px 22px; color:var(--text); font-size:13.5px; border-left:3px solid transparent}
+  nav.side a.nl:hover{background:var(--panel); text-decoration:none; color:var(--text-strong)}
+  nav.side a.nl.active{border-left-color:var(--accent); color:var(--accent-hi); background:rgba(232,126,36,.07)}
+  nav.side .grouphdr{padding:14px 22px 4px; font-size:10.5px; letter-spacing:1.4px; text-transform:uppercase; color:var(--muted)}
+
+  main{flex:1; min-width:0; padding:40px 52px 90px; max-width:1000px}
+  header.hero{margin-bottom:8px}
+  header.hero h1{font-size:34px; margin:0 0 6px; color:var(--text-strong); letter-spacing:.4px}
+  header.hero h1 .accent{color:var(--accent)}
+  header.hero .tag{color:var(--muted); font-size:15.5px; margin-bottom:18px}
+  .pills{display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 30px}
+  .pill{font-family:var(--mono); font-size:11.5px; color:var(--text); background:var(--panel);
+    border:1px solid var(--border); border-radius:20px; padding:4px 12px}
+  .pill b{color:var(--accent-hi); font-weight:600}
+
+  section{margin:46px 0; scroll-margin-top:20px}
+  section > h2{font-size:23px; color:var(--text-strong); margin:0 0 4px; padding-bottom:8px;
+    border-bottom:1px solid var(--border); display:flex; align-items:baseline; gap:10px}
+  section > h2 .hash{color:var(--accent); font-family:var(--mono); font-size:18px; opacity:.8}
+  section .lead{color:var(--muted); margin:.4em 0 1.3em}
+  h3{font-size:16.5px; color:var(--accent-hi); margin:28px 0 8px; font-weight:600}
+
+  table{width:100%; border-collapse:collapse; margin:14px 0; background:var(--panel);
+    border:1px solid var(--border); border-radius:8px; overflow:hidden; font-size:14px}
+  thead th{background:var(--panel2); color:var(--muted); text-align:left; font-weight:600;
+    font-size:11.5px; letter-spacing:.6px; text-transform:uppercase; padding:9px 14px;
+    border-bottom:1px solid var(--border)}
+  tbody td{padding:9px 14px; border-bottom:1px solid var(--border-soft); vertical-align:top}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:rgba(45,79,122,.13)}
+  td.sig{white-space:nowrap; font-family:var(--mono); color:#f0c89a; font-size:13px}
+  td.sig .args{color:var(--muted)}
+
+  /* code blocks */
+  pre{background:var(--panel); border:1px solid var(--border); border-left:3px solid var(--accent);
+    border-radius:6px; padding:14px 16px; overflow-x:auto; position:relative; margin:12px 0}
+  pre code{background:none; border:none; padding:0; color:#d6d9e0; font-size:13px; line-height:1.7}
+  pre .k{color:var(--accent-hi)} /* channel keys r= g= */
+  pre .c{color:var(--muted); font-style:italic}
+  .copybtn{position:absolute; top:8px; right:8px; font-family:var(--sans); font-size:11px;
+    color:var(--muted); background:var(--panel2); border:1px solid var(--border); border-radius:5px;
+    padding:3px 9px; cursor:pointer; opacity:0; transition:opacity .12s}
+  pre:hover .copybtn{opacity:1}
+  .copybtn:hover{color:var(--accent-hi); border-color:var(--accent)}
+
+  /* function filter */
+  .filterbar{display:flex; align-items:center; gap:12px; margin:6px 0 14px}
+  .filterbar input{flex:1; max-width:340px; background:var(--panel); border:1px solid var(--border);
+    border-radius:6px; color:var(--text); font-family:var(--mono); font-size:13px; padding:8px 12px}
+  .filterbar input:focus{outline:none; border-color:var(--accent)}
+  .filterbar .count{color:var(--muted); font-size:12.5px; font-family:var(--mono)}
+  tr.fn.hide{display:none}
+  .cat{color:var(--accent); font-family:var(--mono); font-size:11px; letter-spacing:.5px;
+    text-transform:uppercase; background:rgba(232,126,36,.08); padding:2px 8px; border-radius:4px;
+    border:1px solid rgba(232,126,36,.25); white-space:nowrap}
+
+  /* preset cards */
+  .presets{display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:16px; margin-top:16px}
+  .card{background:var(--panel); border:1px solid var(--border); border-radius:8px; overflow:hidden;
+    display:flex; flex-direction:column}
+  .card .ch{padding:13px 15px 9px; border-bottom:1px solid var(--border-soft)}
+  .card .ch h4{margin:0; font-size:15px; color:var(--text-strong)}
+  .card .ch .grp{font-size:10.5px; color:var(--accent); font-family:var(--mono); text-transform:uppercase;
+    letter-spacing:.6px; margin-bottom:3px}
+  .card .ch p{margin:5px 0 0; font-size:12.5px; color:var(--muted); line-height:1.5}
+  .card pre{margin:0; border:none; border-left:none; border-radius:0; background:var(--bg); flex:1}
+  .card pre code{font-size:12px}
+
+  .note{background:rgba(45,79,122,.12); border:1px solid var(--sel); border-radius:7px;
+    padding:13px 16px; margin:16px 0; font-size:14px}
+  .note.warn{background:rgba(232,126,36,.08); border-color:rgba(232,126,36,.4)}
+  .note b{color:var(--text-strong)}
+
+  .hostgrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-top:14px}
+  .hostgrid .h{background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:15px 17px}
+  .hostgrid .h .t{font-weight:600; color:var(--text-strong); margin-bottom:6px; display:flex; align-items:center; gap:8px}
+  .hostgrid .h .badge{font-family:var(--mono); font-size:10.5px; padding:2px 7px; border-radius:4px}
+  .badge.cpu{background:rgba(138,143,156,.18); color:#b7bcc8; border:1px solid var(--border)}
+  .badge.gpu{background:rgba(26,102,0,.2); color:var(--green-soft); border:1px solid var(--green)}
+  .hostgrid .h p{margin:0; font-size:13px; color:var(--muted)}
+
+  footer{margin-top:60px; padding-top:22px; border-top:1px solid var(--border); color:var(--muted); font-size:13px}
+  footer a{font-family:var(--mono)}
+
+  .toplink{display:inline-block; margin-top:6px; font-size:12px; color:var(--muted); font-family:var(--mono)}
+
+  @media (max-width:880px){
+    nav.side{display:none}
+    main{padding:26px 20px 70px}
+    header.hero h1{font-size:27px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<nav class="side">
+  <div class="brand">
+    <div class="logo"><span class="dot"></span><h1>Expression</h1></div>
+    <div class="sub">forge-colorx · OFX</div>
+  </div>
+  <a class="nl" href="#overview">Overview</a>
+  <a class="nl" href="#install">Install</a>
+  <div class="grouphdr">Language</div>
+  <a class="nl" href="#model">The pixel model</a>
+  <a class="nl" href="#variables">Predefined variables</a>
+  <a class="nl" href="#knobs">Knobs &amp; output</a>
+  <a class="nl" href="#operators">Operators</a>
+  <a class="nl" href="#functions">Function library</a>
+  <div class="grouphdr">Cookbook</div>
+  <a class="nl" href="#presets">Preset gallery</a>
+  <a class="nl" href="#hosts">Hosts &amp; GPU</a>
+</nav>
+
+<main>
+  <header class="hero">
+    <h1><span class="accent">Expression</span> reference</h1>
+    <div class="tag">An OpenFX re-creation of Nuke's <b>Color&nbsp;&gt;&nbsp;Math&nbsp;&gt;&nbsp;Expression</b> node —
+      per-channel math, parsed and evaluated at run time.</div>
+    <div class="pills">
+      <span class="pill">Hosts: <b>Flame 2021+ · Resolve · Nuke · Natron</b></span>
+      <span class="pill">GPU: <b>Metal · CUDA</b> · CPU everywhere</span>
+      <span class="pill"><b>20</b> built-in presets</span>
+    </div>
+  </header>
+
+  <section id="overview">
+    <h2><span class="hash">#</span> Overview</h2>
+    <p class="lead">A faithful clone of Nuke's Expression node: four per-channel text fields
+      (<code>r=</code> <code>g=</code> <code>b=</code> <code>a=</code>) hold math that is compiled once
+      per render and evaluated per pixel. It runs as a filter over its source clip and loads in
+      <b>Autodesk Flame (2021+)</b>, <b>DaVinci&nbsp;Resolve / Fusion</b>, Nuke, Natron, and any other
+      OpenFX host. The node appears under <b>Color&nbsp;/&nbsp;Math&nbsp;&gt;&nbsp;Expression</b>.</p>
+    <p>The panel has four pages: <b>Channels</b> (the r/g/b/a expressions), <b>Variables</b>
+      (a block of <code>name = formula</code> statements), <b>Constants</b> (the <code>k1..k4</code>
+      knobs + Reference Colour), and <b>Output</b> (Mix, Clamp, and the <a href="#presets">Preset</a>
+      pulldown).</p>
+  </section>
+
+  <section id="install">
+    <h2><span class="hash">#</span> Install</h2>
+    <p class="lead">Grab a prebuilt bundle from the
+      <a href="https://github.com/cnoellert/forge-colorx/releases/latest">latest release</a>
+      (macOS + Linux), or build from source.</p>
+    <ol>
+      <li>Unzip → <code>Expression.ofx.bundle</code>.</li>
+      <li>Copy it to the OFX plugin path (root-owned — use <code>sudo</code>):
+        <code>/Library/OFX/Plugins/</code> on macOS, <code>/usr/OFX/Plugins/</code> on Linux.</li>
+      <li><b>macOS only</b> — clear the download quarantine, or the host silently skips it:
+        <pre><code>sudo xattr -dr com.apple.quarantine "/Library/OFX/Plugins/Expression.ofx.bundle"</code><button class="copybtn">copy</button></pre></li>
+      <li>Restart the host — OFX plugins are scanned at launch.</li>
+    </ol>
+    <div class="note"><b>Linux:</b> the release ships two builds — a <b>RHEL&nbsp;/&nbsp;Flame</b>
+      one (needs only glibc&nbsp;2.29, loads on Flame's RHEL boxes) and a <b>modern</b> one
+      (Ubuntu, newer glibc). On a RHEL-based Flame workstation, take the RHEL build.</div>
+  </section>
+
+  <section id="model">
+    <h2><span class="hash">#</span> The pixel model</h2>
+    <p class="lead">An expression sees <b>only the current pixel</b> — its <code>r g b a</code> and its
+      coordinates. That makes it perfect for generators and per-pixel grades, but it cannot blur,
+      sharpen, or sample neighbouring pixels.</p>
+    <ul>
+      <li><code>x y</code> are pixel coordinates, origin <b>bottom-left</b> (as in Nuke).</li>
+      <li><code>cx cy</code> are <b>centred and aspect-preserved</b>: <code>0,0</code> at the centre,
+        <code>±1</code> at the left/right edges — use these for resolution-independent patterns.</li>
+      <li>Channels are normalised <code>0..1</code>. For byte/short clips they are scaled on the way in
+        and written back at the clip's bit depth (clamped); float clips pass through unclamped (HDR-safe).</li>
+      <li>An empty channel evaluates to <code>0</code>; the defaults <code>r g b a</code> are a pass-through.</li>
+    </ul>
+  </section>
+
+  <section id="variables">
+    <h2><span class="hash">#</span> Predefined variables</h2>
+    <p class="lead">Available to every expression, alongside any names you define.</p>
+    <table>
+      <thead><tr><th>Name</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">r g b a</td><td>Input channels, normalised <code>0..1</code>.</td></tr>
+        <tr><td class="sig">x y</td><td>Pixel coordinates, origin bottom-left.</td></tr>
+        <tr><td class="sig">cx cy</td><td>Centred, aspect-preserved coords: <code>(0,0)</code> centre, <code>±1</code> at L/R edges.</td></tr>
+        <tr><td class="sig">width height</td><td>Image size (region of definition).</td></tr>
+        <tr><td class="sig">frame · t</td><td>Current frame / render time (continuous — can be fractional). <code>t</code> is the Nuke-parity alias.</td></tr>
+        <tr><td class="sig">pi e</td><td>Math constants (also callable as <code>pi()</code> <code>e()</code>).</td></tr>
+        <tr><td class="sig">k1 k2 k3 k4</td><td>The Constants-page knobs (<code>k1</code> defaults to 1, rest 0). Animatable.</td></tr>
+        <tr><td class="sig">ref.r ref.g ref.b</td><td>The Reference Colour swatch (RGB), default <code>0</code>.</td></tr>
+        <tr><td class="sig"><i>your aliases</i></td><td>A name you give a knob (e.g. call <code>k1</code> "gamma" → <code>gamma</code> resolves to it).</td></tr>
+        <tr><td class="sig"><i>your variables</i></td><td>Any <code>name = formula</code> you define in the Variables block.</td></tr>
+      </tbody>
+    </table>
+    <div class="note"><b>Variables vs constants.</b> A <b>variable</b> is <i>computed</i>
+      (a <code>name = formula</code> in the Variables block, derived from the image and evaluated in
+      order before the channels). A <b>constant</b> is <i>dialled</i> (a named knob + slider). Both are
+      usable anywhere in the channels. Use <code>#</code> to start a comment; separate statements with
+      <code>;</code> or a newline (Flame collapses newlines, so prefer <code>;</code> there).</div>
+  </section>
+
+  <section id="knobs">
+    <h2><span class="hash">#</span> Knobs &amp; output</h2>
+    <table>
+      <thead><tr><th>Control</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">k1 … k4</td><td>Animatable scalar knobs. Reference by <code>kN</code> or by the alias you name them. Range is unbounded; display range −1…1.</td></tr>
+        <tr><td class="sig">Reference Colour</td><td>An RGB swatch, read as <code>ref.r</code> <code>ref.g</code> <code>ref.b</code>.</td></tr>
+        <tr><td class="sig">Mix</td><td>Blends original image (<code>0</code>) ↔ expression result (<code>1</code>).</td></tr>
+        <tr><td class="sig">Clamp Output</td><td>Clamps the result to <code>0..1</code> (applied <i>before</i> Mix).</td></tr>
+        <tr><td class="sig">Preset</td><td>A pulldown that loads a whole effect (channels + variables + knob values). See the <a href="#presets">gallery</a>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="operators">
+    <h2><span class="hash">#</span> Operators</h2>
+    <table>
+      <thead><tr><th>Group</th><th>Operators</th></tr></thead>
+      <tbody>
+        <tr><td class="sig">Arithmetic</td><td><code>+</code> <code>-</code> <code>*</code> <code>/</code> <code>%</code> &nbsp; <code>^</code> (power, right-associative)</td></tr>
+        <tr><td class="sig">Comparison</td><td><code>&lt;</code> <code>&lt;=</code> <code>&gt;</code> <code>&gt;=</code> <code>==</code> <code>!=</code></td></tr>
+        <tr><td class="sig">Logical</td><td><code>&amp;&amp;</code> <code>||</code> <code>!</code></td></tr>
+        <tr><td class="sig">Conditional</td><td><code>cond ? a : b</code> (ternary)</td></tr>
+      </tbody>
+    </table>
+    <p>Precedence follows C, with one deliberate choice: <code>^</code> binds tighter than unary minus, so
+      <code>-2^2 == -4</code>.</p>
+  </section>
+
+  <section id="functions">
+    <h2><span class="hash">#</span> Function library</h2>
+    <p class="lead">Matches Nuke's Expression function set. Type to filter.</p>
+    <div class="filterbar">
+      <input id="fnfilter" type="text" placeholder="filter functions… (e.g. noise, clamp, atan)" autocomplete="off">
+      <span class="count" id="fncount"></span>
+    </div>
+    <table>
+      <thead><tr><th style="width:30%">Signature</th><th style="width:13%">Group</th><th>Description</th></tr></thead>
+      <tbody id="fntable">
+        <tr class="fn"><td class="sig">sin(x) cos(x) tan(x)</td><td><span class="cat">trig</span></td><td>Sine, cosine, tangent (radians).</td></tr>
+        <tr class="fn"><td class="sig">asin(x) acos(x) atan(x)</td><td><span class="cat">trig</span></td><td>Inverse trig (radians).</td></tr>
+        <tr class="fn"><td class="sig">atan2(y, x) <span class="args">/ atan(y,x)</span></td><td><span class="cat">trig</span></td><td>Two-argument arctangent — angle of the vector <code>(x,y)</code>, full <code>−π…π</code> range.</td></tr>
+        <tr class="fn"><td class="sig">sinh(x) cosh(x) tanh(x)</td><td><span class="cat">trig</span></td><td>Hyperbolic sine, cosine, tangent.</td></tr>
+        <tr class="fn"><td class="sig">exp(x)</td><td><span class="cat">exp/log</span></td><td><code>e</code> raised to <code>x</code>.</td></tr>
+        <tr class="fn"><td class="sig">log(x) log10(x) log2(x)</td><td><span class="cat">exp/log</span></td><td>Natural, base-10, base-2 logarithms.</td></tr>
+        <tr class="fn"><td class="sig">pow(x, y)</td><td><span class="cat">exp/log</span></td><td><code>x</code> raised to <code>y</code> (same as <code>x^y</code>).</td></tr>
+        <tr class="fn"><td class="sig">pow2(x)</td><td><span class="cat">exp/log</span></td><td><code>x*x</code>.</td></tr>
+        <tr class="fn"><td class="sig">sqrt(x)</td><td><span class="cat">exp/log</span></td><td>Square root.</td></tr>
+        <tr class="fn"><td class="sig">ldexp(x, e)</td><td><span class="cat">exp/log</span></td><td><code>x · 2^e</code>.</td></tr>
+        <tr class="fn"><td class="sig">exponent(x) mantissa(x)</td><td><span class="cat">exp/log</span></td><td>Split a float into its base-2 exponent and mantissa.</td></tr>
+        <tr class="fn"><td class="sig">abs(x) <span class="args">/ fabs(x)</span></td><td><span class="cat">round</span></td><td>Absolute value.</td></tr>
+        <tr class="fn"><td class="sig">floor(x) ceil(x)</td><td><span class="cat">round</span></td><td>Round down / up to an integer.</td></tr>
+        <tr class="fn"><td class="sig">trunc(x) <span class="args">/ int(x)</span></td><td><span class="cat">round</span></td><td>Truncate toward zero.</td></tr>
+        <tr class="fn"><td class="sig">round(x) rint(x)</td><td><span class="cat">round</span></td><td>Round to nearest integer.</td></tr>
+        <tr class="fn"><td class="sig">sign(x)</td><td><span class="cat">round</span></td><td><code>−1, 0, +1</code> by sign of <code>x</code>.</td></tr>
+        <tr class="fn"><td class="sig">fmod(x, y)</td><td><span class="cat">round</span></td><td>Floating-point remainder (C-style — sign of the dividend).</td></tr>
+        <tr class="fn"><td class="sig">hypot(x, y)</td><td><span class="cat">geom</span></td><td>Euclidean length <code>√(x²+y²)</code> — distance from origin.</td></tr>
+        <tr class="fn"><td class="sig">radians(x) degrees(x)</td><td><span class="cat">geom</span></td><td>Convert between degrees and radians.</td></tr>
+        <tr class="fn"><td class="sig">min(…) max(…)</td><td><span class="cat">range</span></td><td>Smallest / largest — variadic (<code>max(r,g,b)</code> works).</td></tr>
+        <tr class="fn"><td class="sig">clamp(x)</td><td><span class="cat">range</span></td><td>Clamp to <code>[0,1]</code> (1-arg form).</td></tr>
+        <tr class="fn"><td class="sig">clamp(x, a, b)</td><td><span class="cat">range</span></td><td>Clamp to <code>[a,b]</code>.</td></tr>
+        <tr class="fn"><td class="sig">lerp(a, b, t) <span class="args">/ mix</span></td><td><span class="cat">interp</span></td><td>Linear blend: <code>a</code> at <code>t=0</code>, <code>b</code> at <code>t=1</code>.</td></tr>
+        <tr class="fn"><td class="sig">step(edge, x)</td><td><span class="cat">interp</span></td><td><code>0</code> if <code>x&lt;edge</code>, else <code>1</code>.</td></tr>
+        <tr class="fn"><td class="sig">smoothstep(a, b, x)</td><td><span class="cat">interp</span></td><td>Smooth Hermite ramp from <code>0</code> to <code>1</code> across <code>[a,b]</code>.</td></tr>
+        <tr class="fn"><td class="sig">noise(x[, y[, z]])</td><td><span class="cat">noise</span></td><td>Classic Perlin gradient noise, signed <code>~[−1,1]</code>. 1–3 dimensions.</td></tr>
+        <tr class="fn"><td class="sig">random(x[, y[, z]])</td><td><span class="cat">noise</span></td><td>Deterministic per-cell hash in <code>[0,1]</code> — feed pixel coords for per-pixel values.</td></tr>
+        <tr class="fn"><td class="sig">fBm(x, y, z, oct, lac, gain)</td><td><span class="cat">noise</span></td><td>Fractal Brownian motion — summed noise octaves (fractal detail).</td></tr>
+        <tr class="fn"><td class="sig">turbulence(x, y, z, oct, lac, gain)</td><td><span class="cat">noise</span></td><td>Like fBm but on <code>|noise|</code> — billowy / veined look.</td></tr>
+        <tr class="fn"><td class="sig">from_sRGB(x) to_sRGB(x)</td><td><span class="cat">colour</span></td><td>Convert between linear and sRGB.</td></tr>
+        <tr class="fn"><td class="sig">from_rec709(x) to_rec709(x)</td><td><span class="cat">colour</span></td><td>Convert between linear and Rec.709.</td></tr>
+        <tr class="fn"><td class="sig">from_byte(x) to_byte(x)</td><td><span class="cat">colour</span></td><td>Convert between <code>0..1</code> and <code>0..255</code>.</td></tr>
+      </tbody>
+    </table>
+    <div class="note"><b>Noise parity.</b> <code>noise()</code> is tableless Perlin (Gustavson/Ashima),
+      computed in float so it is identical across the CPU, CUDA and Metal back-ends. It is not a bit-exact
+      match to Nuke's own permutation. For an integer-frame seed that doesn't shimmer within a frame, wrap
+      time as <code>floor(t)</code>.</div>
+  </section>
+
+  <section id="presets">
+    <h2><span class="hash">#</span> Preset gallery</h2>
+    <p class="lead">Every preset below is built into the <b>Preset</b> pulldown — picking one fills the
+      channels, the Variables block, and the suggested <code>k1..k4</code>. They're also copy-paste ready.
+      <code>k1..k4</code> are the live sliders; <code>ref</code> is the Reference Colour.</p>
+    <div class="presets">
+
+      <div class="card"><div class="ch"><div class="grp">Technical</div><h4>UV (ST) pass</h4><p>Red = horizontal, green = vertical coordinate pass.</p></div>
+        <pre><code><span class="k">r =</span> x/width
+<span class="k">g =</span> y/height
+<span class="k">b =</span> 0
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Technical</div><h4>Radial gradient</h4><p>White at centre → black. <b>k1</b> = radius (try 1.0).</p></div>
+        <pre><code><span class="c">vars: d = hypot(cx,cy)</span>
+<span class="k">r =</span> clamp(1 - d/k1)
+<span class="k">g =</span> clamp(1 - d/k1)
+<span class="k">b =</span> clamp(1 - d/k1)
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Technical</div><h4>Angle sweep</h4><p>A 0→1 ramp swept around the centre (conical gradient).</p></div>
+        <pre><code><span class="c">vars: ang = (atan2(cy,cx) + pi) / (2*pi)</span>
+<span class="k">r =</span> ang
+<span class="k">g =</span> ang
+<span class="k">b =</span> ang
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Gradient</div><h4>Rainbow (cosine palette)</h4><p>A smooth horizontal rainbow.</p></div>
+        <pre><code><span class="c">vars: u = x/width</span>
+<span class="k">r =</span> 0.5 + 0.5*cos(6.2831853*(u + 0.00))
+<span class="k">g =</span> 0.5 + 0.5*cos(6.2831853*(u + 0.33))
+<span class="k">b =</span> 0.5 + 0.5*cos(6.2831853*(u + 0.67))
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Gradient</div><h4>Reference → white</h4><p>Left = Reference Colour, right = white. Pick a colour to drive it.</p></div>
+        <pre><code><span class="c">vars: u = x/width</span>
+<span class="k">r =</span> lerp(ref.r, 1, u)
+<span class="k">g =</span> lerp(ref.g, 1, u)
+<span class="k">b =</span> lerp(ref.b, 1, u)
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Pattern</div><h4>Checkerboard</h4><p><b>k1</b> = cell size in pixels (try 32).</p></div>
+        <pre><code><span class="c">vars: c = fmod(floor(x/k1) + floor(y/k1), 2)</span>
+<span class="k">r =</span> c
+<span class="k">g =</span> c
+<span class="k">b =</span> c
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Pattern</div><h4>Stripes</h4><p>Vertical bars. <b>k1</b> = period in pixels (try 32).</p></div>
+        <pre><code><span class="c">vars: f = x/k1 - floor(x/k1)</span>
+<span class="k">r =</span> step(0.5, f)
+<span class="k">g =</span> step(0.5, f)
+<span class="k">b =</span> step(0.5, f)
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Pattern</div><h4>Concentric rings</h4><p><b>k1</b> = ring frequency (try 6).</p></div>
+        <pre><code><span class="c">vars: d = hypot(cx,cy)</span>
+<span class="k">r =</span> 0.5 + 0.5*sin(d*k1*6.2831853)
+<span class="k">g =</span> 0.5 + 0.5*sin(d*k1*6.2831853)
+<span class="k">b =</span> 0.5 + 0.5*sin(d*k1*6.2831853)
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Pattern</div><h4>Flower / rose</h4><p>A petalled mask. <b>k2</b> = number of petals (try 5).</p></div>
+        <pre><code><span class="c">vars: ang = atan2(cy,cx); rad = hypot(cx,cy);
+      m = step(rad, 0.4 + 0.3*cos(ang*k2))</span>
+<span class="k">r =</span> m
+<span class="k">g =</span> m
+<span class="k">b =</span> m
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Pattern · animated</div><h4>Plasma</h4><p>Retro demoscene plasma — animates on <code>t</code>. <b>k1</b> = scale (try 3).</p></div>
+        <pre><code><span class="c">vars: v = sin(cx*k1*3) + sin(cy*k1*3 + t*0.1)
+      + sin((cx+cy)*k1*2)
+      + sin(hypot(cx,cy)*k1*4 - t*0.13)</span>
+<span class="k">r =</span> 0.5 + 0.5*sin(v)
+<span class="k">g =</span> 0.5 + 0.5*sin(v + 2.0944)
+<span class="k">b =</span> 0.5 + 0.5*sin(v + 4.1888)
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Noise · animated</div><h4>Clouds (fBm)</h4><p>Soft drifting clouds. <b>k1</b> = scale (try 3).</p></div>
+        <pre><code><span class="c">vars: n = fBm(cx*k1, cy*k1, t*0.05, 5, 2, 0.5);
+      c = clamp(n*0.5 + 0.5)</span>
+<span class="k">r =</span> c
+<span class="k">g =</span> c
+<span class="k">b =</span> c
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Noise</div><h4>Marble</h4><p>Veined marble from turbulence. <b>k1</b> = scale (3), <b>k2</b> = vein freq (2).</p></div>
+        <pre><code><span class="c">vars: tu = turbulence(cx*k1, cy*k1, t*0.05, 5, 2, 0.5);
+      m = 0.5 + 0.5*sin((cx + tu*2)*6.2831853*k2)</span>
+<span class="k">r =</span> m
+<span class="k">g =</span> m
+<span class="k">b =</span> m
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Noise</div><h4>Colorized noise</h4><p>Perlin pushed through the cosine palette. <b>k1</b> = scale (try 3).</p></div>
+        <pre><code><span class="c">vars: n = fBm(cx*k1, cy*k1, t*0.05, 5, 2, 0.5)*0.5 + 0.5</span>
+<span class="k">r =</span> 0.5 + 0.5*cos(6.2831853*(n + 0.00))
+<span class="k">g =</span> 0.5 + 0.5*cos(6.2831853*(n + 0.33))
+<span class="k">b =</span> 0.5 + 0.5*cos(6.2831853*(n + 0.67))
+<span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Noise · on input</div><h4>Film grain</h4><p>Per-pixel grain on the image. <b>k1</b> = amount (try 0.1). Offsets decorrelate the channels.</p></div>
+        <pre><code><span class="k">r =</span> r + (random(x,    y,    t) - 0.5)*k1
+<span class="k">g =</span> g + (random(x+11, y,    t) - 0.5)*k1
+<span class="k">b =</span> b + (random(x,    y+7,  t) - 0.5)*k1
+<span class="k">a =</span> a</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Grade · on input</div><h4>Gamma</h4><p><b>k1</b> = gamma (try 2.2).</p></div>
+        <pre><code><span class="k">r =</span> pow(r, 1/k1)
+<span class="k">g =</span> pow(g, 1/k1)
+<span class="k">b =</span> pow(b, 1/k1)
+<span class="k">a =</span> a</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Grade · on input</div><h4>Saturation</h4><p><b>k1</b>: 0 = greyscale, 1 = unchanged, &gt;1 = boosted.</p></div>
+        <pre><code><span class="c">vars: lum = 0.2126*r + 0.7152*g + 0.0722*b</span>
+<span class="k">r =</span> lum + (r - lum)*k1
+<span class="k">g =</span> lum + (g - lum)*k1
+<span class="k">b =</span> lum + (b - lum)*k1
+<span class="k">a =</span> a</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Grade · on input</div><h4>Duotone</h4><p>Shadows → Reference Colour, highlights → white, by luminance.</p></div>
+        <pre><code><span class="c">vars: lum = 0.2126*r + 0.7152*g + 0.0722*b</span>
+<span class="k">r =</span> lerp(ref.r, 1, lum)
+<span class="k">g =</span> lerp(ref.g, 1, lum)
+<span class="k">b =</span> lerp(ref.b, 1, lum)
+<span class="k">a =</span> a</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Grade · on input</div><h4>Posterize</h4><p>Quantise to bands. <b>k1</b> = number of levels (try 6).</p></div>
+        <pre><code><span class="k">r =</span> floor(r*k1)/k1
+<span class="k">g =</span> floor(g*k1)/k1
+<span class="k">b =</span> floor(b*k1)/k1
+<span class="k">a =</span> a</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Grade · on input</div><h4>Vignette</h4><p>Darken the edges. <b>k1</b> = strength (try 0.7).</p></div>
+        <pre><code><span class="c">vars: d = hypot(cx,cy); v = clamp(1 - d*k1)</span>
+<span class="k">r =</span> r*v
+<span class="k">g =</span> g*v
+<span class="k">b =</span> b*v
+<span class="k">a =</span> a</code><button class="copybtn">copy</button></pre></div>
+
+      <div class="card"><div class="ch"><div class="grp">Grade · on input</div><h4>Scanlines (CRT)</h4><p><b>k1</b> = line frequency (try 1.5).</p></div>
+        <pre><code><span class="c">vars: s = 0.6 + 0.4*sin(y*k1)</span>
+<span class="k">r =</span> r*s
+<span class="k">g =</span> g*s
+<span class="k">b =</span> b*s
+<span class="k">a =</span> a</code><button class="copybtn">copy</button></pre></div>
+
+    </div>
+    <p class="toplink">Handy constants: <code>6.2831853</code> = 2π · <code>2.0944</code> = 2π/3 · <code>4.1888</code> = 4π/3.
+      The palette presets use <a href="https://iquilezles.org/articles/palettes/">Inigo Quilez's cosine palette</a>.</p>
+  </section>
+
+  <section id="hosts">
+    <h2><span class="hash">#</span> Hosts &amp; GPU</h2>
+    <p class="lead">The same expression runs on whichever back-end the host supports; results match
+      across all of them.</p>
+    <div class="hostgrid">
+      <div class="h"><div class="t">DaVinci Resolve <span class="badge gpu">Metal</span></div><p>GPU path on macOS — pixel-verified. CUDA on Linux/NVIDIA.</p></div>
+      <div class="h"><div class="t">Autodesk Flame <span class="badge cpu">CPU</span></div><p>Multithreaded CPU path. Metal is gated off — Flame's macOS OFX host crashes on a Metal-advertising node.</p></div>
+      <div class="h"><div class="t">Nuke · Natron · Fusion <span class="badge cpu">CPU</span></div><p>Multithreaded CPU evaluation; each expression is compiled once per render.</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <div>forge-colorx · <a href="https://github.com/cnoellert/forge-colorx">github.com/cnoellert/forge-colorx</a> ·
+      <a href="https://github.com/cnoellert/forge-colorx/releases/latest">Latest release</a></div>
+    <div style="margin-top:6px">A re-creation of Nuke's Color&nbsp;&gt;&nbsp;Math&nbsp;&gt;&nbsp;Expression node for OpenFX hosts.</div>
+  </footer>
+</main>
+</div>
+
+<script>
+// --- function filter ---
+(function(){
+  var input=document.getElementById('fnfilter'),
+      rows=[].slice.call(document.querySelectorAll('#fntable tr.fn')),
+      count=document.getElementById('fncount');
+  function update(){
+    var q=input.value.trim().toLowerCase(), shown=0;
+    rows.forEach(function(r){
+      var hit = !q || r.textContent.toLowerCase().indexOf(q)>-1;
+      r.classList.toggle('hide', !hit); if(hit) shown++;
+    });
+    count.textContent = shown + ' / ' + rows.length;
+  }
+  input.addEventListener('input', update); update();
+})();
+
+// --- copy buttons ---
+[].slice.call(document.querySelectorAll('.copybtn')).forEach(function(btn){
+  btn.addEventListener('click', function(){
+    var code = btn.parentNode.querySelector('code').innerText;
+    navigator.clipboard.writeText(code).then(function(){
+      var old=btn.textContent; btn.textContent='copied'; btn.style.color='var(--green-soft)';
+      setTimeout(function(){btn.textContent=old; btn.style.color='';},1100);
+    });
+  });
+});
+
+// --- active-section highlight ---
+(function(){
+  var links=[].slice.call(document.querySelectorAll('nav.side a.nl')),
+      map={}; links.forEach(function(l){map[l.getAttribute('href').slice(1)]=l;});
+  var secs=[].slice.call(document.querySelectorAll('main section[id]'));
+  var obs=new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(l){l.classList.remove('active');});
+        if(map[e.target.id]) map[e.target.id].classList.add('active');
+      }
+    });
+  },{rootMargin:'-15% 0px -75% 0px'});
+  secs.forEach(function(s){obs.observe(s);});
+})();
+</script>
+</body>
+</html>

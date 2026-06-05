@@ -25,6 +25,9 @@ forge-colorx/
 - **GPU where it's safe:** Metal on DaVinci Resolve, opt-in CUDA on Linux/NVIDIA; the
   multithreaded **CPU** path everywhere else (including Flame).
 
+📖 **[Reference manual](https://cnoellert.github.io/forge-colorx/)** — a browsable page with
+the variables, operators, the full function library, and the preset gallery.
+
 See [`ofx/Expression/README.md`](ofx/Expression/README.md) for build, install, the full
 Nuke→here function-parity table, and worked examples. For a gallery of effects — also
 built into the Preset pulldown — see [`PRESETS.md`](PRESETS.md).
