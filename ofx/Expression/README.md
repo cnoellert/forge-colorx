@@ -6,6 +6,10 @@ expressions and they are parsed and evaluated **at run time** — the actual Nuk
 behaviour. The built `.ofx` loads in **Autodesk Flame (2021+)**, Nuke, DaVinci
 Resolve/Fusion, Natron, and any other OpenFX host.
 
+📖 **Online reference:** <https://cnoellert.github.io/forge-colorx/> — the variables,
+operators, function library, and preset gallery on one browsable page (also reachable
+from the node's **Expression syntax** button).
+
 ```
 Expression/
 ├── Expression.cpp   the OFX plugin (params, render, channel dispatch)

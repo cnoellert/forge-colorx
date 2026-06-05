@@ -3,6 +3,9 @@
 A gallery of ready-to-paste presets for the **Expression** OFX node. Every preset
 here is validated against the expression parser, so it compiles as-is.
 
+📖 Browsable version (with the full function library) at
+<https://cnoellert.github.io/forge-colorx/#presets>.
+
 > **Tip:** every preset below is also built into the node's **Preset** pulldown (top
 > of the *Channels* page). Picking one stamps its `r/g/b/a`, the `Variables` block,
 > and the suggested `k1..k4` values straight into the fields — no copy-paste needed.
