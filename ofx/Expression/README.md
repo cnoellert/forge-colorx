@@ -1,10 +1,10 @@
 # Expression — an OpenFX port of Nuke's Expression node
 
 A genuine re-creation of Nuke's **Color > Math > Expression** node as an OpenFX
-plugin. Unlike a Matchbox shader, an OFX host gives you real **text fields**, so
-you type per-channel expressions and they are parsed and evaluated **at run
-time** — the actual Nuke behaviour. The built `.ofx` loads in **Autodesk Flame
-(2021+)**, Nuke, DaVinci Resolve/Fusion, Natron, and any other OpenFX host.
+plugin. An OFX host gives you real **text fields**, so you type per-channel
+expressions and they are parsed and evaluated **at run time** — the actual Nuke
+behaviour. The built `.ofx` loads in **Autodesk Flame (2021+)**, Nuke, DaVinci
+Resolve/Fusion, Natron, and any other OpenFX host.
 
 ```
 Expression/
@@ -13,18 +13,6 @@ Expression/
 ├── Makefile         build to Expression.ofx.bundle
 └── README.md        this file
 ```
-
-## Why OFX instead of Matchbox
-
-| | Matchbox | OFX (this) |
-|---|---|---|
-| Per-channel **typed** expressions, live | No (compiled GLSL, no text field) | **Yes** |
-| Runs on | Flame family | Flame + every OFX host |
-| Execution | GPU | CPU (multithreaded) + GPU on verified hosts (Metal/CUDA) |
-| Install | drop files | build per platform, drop `.ofx.bundle` |
-
-The Matchbox version (separate deliverable) stays useful when you want GPU speed
-and don't need to retype expressions; this OFX version is the faithful clone.
 
 ## Build
 
@@ -114,11 +102,10 @@ implements the snap-to-`(Custom)` behaviour.)
 | `ref.r ref.g ref.b` | The Reference Colour knob (RGB), default `0`            |
 | *your variables* | Whatever you name in the Variables rows                    |
 
-The `k1..k4`/aliases, `ref`, **Mix** and **Clamp Output** mirror the companion
-Matchbox build, so the OFX is a superset: type any expression *and* drive it live
-with keyframable, nameable constants. **Mix** blends the original image (0) with the
-expression result (1); **Clamp Output** clamps the result to `0..1` (applied before
-Mix, matching the Matchbox).
+The `k1..k4`/aliases, `ref`, **Mix** and **Clamp Output** let you drive an expression
+live with keyframable, nameable constants. **Mix** blends the original image (0) with
+the expression result (1); **Clamp Output** clamps the result to `0..1` (applied before
+Mix).
 
 For byte/short clips the channels are normalised to 0..1 on the way in and
 written back at the clip's bit depth (clamped). Float clips pass through
@@ -146,8 +133,7 @@ Notes / deliberate parity choices:
 - `min`/`max` are variadic (`max(r,g,b)` works).
 - `fmod` is C-style (sign of the dividend).
 - `noise()` is **classic Perlin** gradient noise (Gustavson/Ashima, tableless),
-  signed ~`[-1,1]`, matching the companion Matchbox shader for cross-tool
-  consistency. Computed in float with a computable permutation (no table) so it is
+  signed ~`[-1,1]`. Computed in float with a computable permutation (no table) so it is
   parity-clean across the CPU/CUDA/Metal back-ends; `random()` likewise uses a
   tableless permute hash (cell-based — feed pixel coords for per-pixel values).
   Not a bit-exact match to Nuke's own Perlin permutation.

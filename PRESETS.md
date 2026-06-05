@@ -251,12 +251,3 @@ g = g*s
 b = b*s
 a = a
 ```
-
----
-
-## Matchbox note
-
-These formulas also work in the companion **Matchbox** shader's `EXPRESSION BLOCK`,
-with GLSL syntax: declare locals as `float`, use `clamp(x,0.0,1.0)` instead of the
-1-arg `clamp(x)`, and write the `k1..k4` / `ref` knobs the same way. The function
-library (`noise`, `fBm`, `turbulence`, `lerp`/`mix`, `step`, `smoothstep`, …) matches.

@@ -26,7 +26,7 @@ struct CudaImageDesc {
     int   rowFloats = 0;      // row stride / sizeof(float)
 };
 
-// User-constant knobs (mirror the Matchbox): k1..k4 + ref colour bound as the
+// User-constant knobs: k1..k4 + ref colour bound as the
 // expression variables k1..k4 / ref.r/.g/.b; mix blends original<->result;
 // clampOut clamps the result to [0,1]. Passed into the kernel uniforms.
 struct ExprKnobs {

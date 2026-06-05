@@ -168,7 +168,7 @@ static inline unsigned short floatToHalf(float f)
 
 // indices of the fixed predefined variables in the variable buffer. r..frame are
 // per-pixel / per-render; k1..k4 and ref.r/.g/.b are the user-constant knobs
-// (uniform across the frame) that bring the OFX in line with the Matchbox build.
+// (uniform across the frame).
 enum { V_R = 0, V_G, V_B, V_A, V_X, V_Y, V_CX, V_CY, V_WIDTH, V_HEIGHT, V_FRAME,
        V_K1, V_K2, V_K3, V_K4, V_REFR, V_REFG, V_REFB, V_FIXED_COUNT };
 
@@ -185,7 +185,7 @@ struct ExprContext {
     std::vector<expreval::Program> derived;
     int                      nVars = 0;
     double                   width = 0, height = 0, frame = 0;
-    // user-constant knobs (mirror the Matchbox: k1..k4, ref colour, mix, clamp)
+    // user-constant knobs: k1..k4, ref colour, mix, clamp
     double                   k[4]   = {1, 0, 0, 0};   // k1 defaults to 1, rest 0
     double                   ref[3] = {0, 0, 0};
     double                   mixAmt = 1.0;            // 0 = original image, 1 = result
@@ -259,8 +259,7 @@ public:
                 out[2] = _ctx->chan[2].eval(&vars[0]);
                 out[3] = _ctx->chan[3].eval(&vars[0]);
 
-                // ---- output knobs: clamp then mix vs the original (matches the
-                //      Matchbox main(): clamp first, then mix(orig, result, amt)) ----
+                // ---- output knobs: clamp first, then mix(orig, result, amt) ----
                 if (clampOut) for (int c = 0; c < 4; ++c)
                     out[c] = out[c] < 0.0 ? 0.0 : (out[c] > 1.0 ? 1.0 : out[c]);
                 if (mixAmt != 1.0) {
