@@ -77,8 +77,10 @@ The UI is split into four pages:
   a friendly token. Name `k1` "gamma" and both `gamma` and `k1` resolve to that
   slider. (These stay as separate boxes because the labelled `k` slider anchors the
   alias box next to it.)
-- **Output** — **Mix** (blend original↔result), **Clamp Output**, and the **Preset**
-  pulldown (a one-pick effect gallery — see [Presets](#presets) below).
+- **Output** — **Mix** (blend original↔result), **Clamp Output**, the **Preset**
+  pulldown (a one-pick effect gallery — see [Presets](#presets) below), and an
+  **Expression syntax** button that opens the [online reference](https://cnoellert.github.io/forge-colorx/)
+  in your browser.
 
 Two kinds of named token: a **Variable** is *computed* (name + formula, in the block),
 a **Constant** is *dialed* (name + slider). Both are usable anywhere in the channels.

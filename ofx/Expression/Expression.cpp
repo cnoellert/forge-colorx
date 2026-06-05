@@ -20,6 +20,7 @@
 // -----------------------------------------------------------------------------
 
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -393,6 +394,24 @@ static const Preset kPresets[] = {
 };
 static const int kPresetCount = (int)(sizeof(kPresets) / sizeof(kPresets[0]));
 
+// The online syntax reference (variables, operators, the function library, the
+// preset gallery). The "Expression syntax" push button opens this in the user's
+// default web browser via the platform's URL handler.
+static const char* kHelpURL = "https://cnoellert.github.io/forge-colorx/";
+
+static void openExpressionHelp()
+{
+    std::string cmd;
+#if defined(_WIN32)
+    cmd = "start \"\" \"" + std::string(kHelpURL) + "\"";
+#elif defined(__APPLE__)
+    cmd = "open \"" + std::string(kHelpURL) + "\"";
+#else   // Linux / other X11 desktops
+    cmd = "xdg-open \"" + std::string(kHelpURL) + "\" >/dev/null 2>&1 &";
+#endif
+    std::system(cmd.c_str());
+}
+
 // ============================================================================
 //  Plugin instance
 // ============================================================================
@@ -492,6 +511,9 @@ void ExpressionPlugin::changedParam(const OFX::InstanceChangedArgs& args, const 
 {
     if (_applying) return;
     if (args.reason != OFX::eChangeUserEdit) return;
+
+    // The "Expression syntax" button opens the online reference in the browser.
+    if (name == "help") { openExpressionHelp(); return; }
 
     if (name == "preset") {
         int idx = 0; _preset->getValue(idx);
@@ -996,6 +1018,16 @@ void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc
                     "r/g/b/a, the Variables block, and the k1..k4 knobs. Hand-editing a "
                     "channel afterwards resets this to (Custom).");
         pgOut->addChild(*pr);
+    }
+
+    // --- Help: a push button that opens the online syntax reference in the
+    //     user's browser. Sits right after the Preset pulldown. ---
+    {
+        OFX::PushButtonParamDescriptor* help = desc.definePushButtonParam("help");
+        help->setLabel("Expression syntax");
+        help->setHint("Open the online reference (variables, operators, the function "
+                      "library, and the preset gallery) in your web browser.");
+        pgOut->addChild(*help);
     }
 }
 
