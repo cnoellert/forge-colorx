@@ -16,6 +16,11 @@ Expression/
 
 ## Build
 
+> **Just want to use it?** Grab a prebuilt macOS/Linux bundle from the
+> [latest release](https://github.com/cnoellert/forge-colorx/releases/latest) and
+> jump to [Install](#install). Build from source only if you need a platform the
+> release doesn't cover.
+
 The plugin uses the standard OpenFX C++ **Support** library. The simplest route
 reuses the openfx repo's build rules:
 
@@ -25,21 +30,37 @@ cp -r Expression openfx/Support/Plugins/Expression
 cd openfx/Support/Plugins/Expression
 make
 # Linux  -> Expression.ofx.bundle/Contents/Linux-x86-64/Expression.ofx
-# macOS  -> Expression.ofx.bundle/Contents/MacOS-x86-64/Expression.ofx
+# macOS  -> Expression.ofx.bundle/Contents/MacOS/Expression.ofx
 ```
 
 Requirements: a C++11 compiler and `make`. No third-party libraries — the
 expression engine (`ExprEval.h`) is self-contained.
 
-### Install
+## Install
 
-Copy `Expression.ofx.bundle` to the OFX plugin path:
+However you got it — a release download or your own build — you end up with an
+`Expression.ofx.bundle`. Install it into the host's OFX plugin path:
 
-- **Linux:** `/usr/OFX/Plugins/`
-- **macOS:** `/Library/OFX/Plugins/`
+1. **Copy the bundle** to the OFX plugin path (both are root-owned, so use `sudo`):
+   - **macOS:** `/Library/OFX/Plugins/`
+   - **Linux:** `/usr/OFX/Plugins/`
 
-or set `OFX_PLUGIN_PATH` to a folder containing it. Flame picks up OFX plugins
-from there; the node appears under **Color/Math > Expression**.
+   (Or point the `OFX_PLUGIN_PATH` env var at a folder that contains the bundle.)
+
+2. **macOS only — clear the download quarantine**, or the host silently skips an
+   unsigned bundle it didn't build itself:
+
+   ```bash
+   sudo xattr -dr com.apple.quarantine "/Library/OFX/Plugins/Expression.ofx.bundle"
+   ```
+
+3. **Restart the host application** — OFX plugins are scanned once at launch.
+
+The node then appears under **Color / Math > Expression**.
+
+On **Linux**, the release ships two bundles: a **RHEL / Flame** build (needs only
+glibc 2.29, loads on Flame's RHEL workstations) and a **modern** build (Ubuntu,
+newer glibc, for recent Resolve etc.). On a RHEL-based Flame box, use the RHEL one.
 
 ## Using it
 
