@@ -3,6 +3,14 @@
 A gallery of ready-to-paste presets for the **Expression** OFX node. Every preset
 here is validated against the expression parser, so it compiles as-is.
 
+> **Tip:** every preset below is also built into the node's **Preset** pulldown (top
+> of the *Channels* page). Picking one stamps its `r/g/b/a`, the `Variables` block,
+> and the suggested `k1..k4` values straight into the fields — no copy-paste needed.
+> Hand-edit any channel afterwards and the pulldown snaps back to *(Custom)*. This
+> page stays the reference for what each preset does and how to drive its knobs.
+> (The pulldown is fed by the `kPresets` table in `ofx/Expression/Expression.cpp` —
+> keep the two in sync.)
+
 ## How to use
 
 - **Channels** — paste each `r =` / `g =` / `b =` / `a =` line into its channel box.

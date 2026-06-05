@@ -296,6 +296,105 @@ private:
 };
 
 // ============================================================================
+//  Preset gallery  (mirrors PRESETS.md — keep the two in sync)
+// ----------------------------------------------------------------------------
+// The "preset" pulldown stamps one of these into the channel/vars/knob params
+// via changedParam(). Index 0 is the "(Custom)" sentinel: it applies nothing,
+// and is where the pulldown snaps back the moment you hand-edit a channel.
+// A preset with setK=true also writes its k1..k4 (the "try N" values from the
+// doc); setK=false leaves the knobs untouched. `t` aliases `frame`, so the
+// animated presets work as-is.
+// ============================================================================
+struct Preset {
+    const char* name;                               // pulldown label
+    const char* r; const char* g; const char* b; const char* a;   // channels
+    const char* vars;                               // Variables block ("" = clear)
+    bool   setK; double k1, k2, k3, k4;             // knob values (if setK)
+};
+
+static const Preset kPresets[] = {
+    { "(Custom)", "r", "g", "b", "a", "", false, 0,0,0,0 },
+
+    // --- Technical / UV ---
+    { "UV (ST) pass",
+      "x/width", "y/height", "0", "1", "", false, 0,0,0,0 },
+    { "Radial gradient",
+      "clamp(1 - d/k1)", "clamp(1 - d/k1)", "clamp(1 - d/k1)", "1",
+      "d = hypot(cx,cy)", true, 1.0, 0,0,0 },
+    { "Angle sweep",
+      "ang", "ang", "ang", "1",
+      "ang = (atan2(cy,cx) + pi) / (2*pi)", false, 0,0,0,0 },
+
+    // --- Gradients & palettes ---
+    { "Rainbow (cosine palette)",
+      "0.5 + 0.5*cos(6.2831853*(u + 0.00))",
+      "0.5 + 0.5*cos(6.2831853*(u + 0.33))",
+      "0.5 + 0.5*cos(6.2831853*(u + 0.67))", "1",
+      "u = x/width", false, 0,0,0,0 },
+    { "Reference -> white gradient",
+      "lerp(ref.r, 1, u)", "lerp(ref.g, 1, u)", "lerp(ref.b, 1, u)", "1",
+      "u = x/width", false, 0,0,0,0 },
+
+    // --- Patterns ---
+    { "Checkerboard",
+      "c", "c", "c", "1",
+      "c = fmod(floor(x/k1) + floor(y/k1), 2)", true, 32, 0,0,0 },
+    { "Stripes",
+      "step(0.5, f)", "step(0.5, f)", "step(0.5, f)", "1",
+      "f = x/k1 - floor(x/k1)", true, 32, 0,0,0 },
+    { "Concentric rings",
+      "0.5 + 0.5*sin(d*k1*6.2831853)", "0.5 + 0.5*sin(d*k1*6.2831853)",
+      "0.5 + 0.5*sin(d*k1*6.2831853)", "1",
+      "d = hypot(cx,cy)", true, 6, 0,0,0 },
+    { "Flower / rose",
+      "m", "m", "m", "1",
+      "ang = atan2(cy,cx); rad = hypot(cx,cy); m = step(rad, 0.4 + 0.3*cos(ang*k2))",
+      true, 1, 5, 0,0 },
+    { "Plasma (animated)",
+      "0.5 + 0.5*sin(v)", "0.5 + 0.5*sin(v + 2.0944)", "0.5 + 0.5*sin(v + 4.1888)", "1",
+      "v = sin(cx*k1*3) + sin(cy*k1*3 + t*0.1) + sin((cx+cy)*k1*2) + sin(hypot(cx,cy)*k1*4 - t*0.13)",
+      true, 3, 0,0,0 },
+
+    // --- Noise (Perlin) ---
+    { "Clouds (animated fBm)",
+      "c", "c", "c", "1",
+      "n = fBm(cx*k1, cy*k1, t*0.05, 5, 2, 0.5); c = clamp(n*0.5 + 0.5)", true, 3, 0,0,0 },
+    { "Marble",
+      "m", "m", "m", "1",
+      "tu = turbulence(cx*k1, cy*k1, t*0.05, 5, 2, 0.5); m = 0.5 + 0.5*sin((cx + tu*2)*6.2831853*k2)",
+      true, 3, 2, 0,0 },
+    { "Colorized noise",
+      "0.5 + 0.5*cos(6.2831853*(n + 0.00))",
+      "0.5 + 0.5*cos(6.2831853*(n + 0.33))",
+      "0.5 + 0.5*cos(6.2831853*(n + 0.67))", "1",
+      "n = fBm(cx*k1, cy*k1, t*0.05, 5, 2, 0.5)*0.5 + 0.5", true, 3, 0,0,0 },
+    { "Film grain (on input)",
+      "r + (random(x,    y,    t) - 0.5)*k1",
+      "g + (random(x+11, y,    t) - 0.5)*k1",
+      "b + (random(x,    y+7,  t) - 0.5)*k1", "a",
+      "", true, 0.1, 0,0,0 },
+
+    // --- Per-pixel colour grades (on input) ---
+    { "Gamma",
+      "pow(r, 1/k1)", "pow(g, 1/k1)", "pow(b, 1/k1)", "a", "", true, 2.2, 0,0,0 },
+    { "Saturation",
+      "lum + (r - lum)*k1", "lum + (g - lum)*k1", "lum + (b - lum)*k1", "a",
+      "lum = 0.2126*r + 0.7152*g + 0.0722*b", true, 1.0, 0,0,0 },
+    { "Duotone",
+      "lerp(ref.r, 1, lum)", "lerp(ref.g, 1, lum)", "lerp(ref.b, 1, lum)", "a",
+      "lum = 0.2126*r + 0.7152*g + 0.0722*b", false, 0,0,0,0 },
+    { "Posterize",
+      "floor(r*k1)/k1", "floor(g*k1)/k1", "floor(b*k1)/k1", "a", "", true, 6, 0,0,0 },
+    { "Vignette",
+      "r*v", "g*v", "b*v", "a",
+      "d = hypot(cx,cy); v = clamp(1 - d*k1)", true, 0.7, 0,0,0 },
+    { "Scanlines (CRT)",
+      "r*s", "g*s", "b*s", "a",
+      "s = 0.6 + 0.4*sin(y*k1)", true, 1.5, 0,0,0 },
+};
+static const int kPresetCount = (int)(sizeof(kPresets) / sizeof(kPresets[0]));
+
+// ============================================================================
 //  Plugin instance
 // ============================================================================
 class ExpressionPlugin : public OFX::ImageEffect {
@@ -319,9 +418,12 @@ public:
         _ref = fetchRGBParam("ref");
         _mix = fetchDoubleParam("mix");
         _clamp = fetchBooleanParam("clampOutput");
+        _preset = fetchChoiceParam("preset");
+        _applying = false;
     }
 
     virtual void render(const OFX::RenderArguments& args);
+    virtual void changedParam(const OFX::InstanceChangedArgs& args, const std::string& name);
 
 private:
     void buildContext(const OFX::RenderArguments& args, ExprContext& ctx);
@@ -351,6 +453,8 @@ private:
     OFX::RGBParam*    _ref;
     OFX::DoubleParam* _mix;
     OFX::BooleanParam* _clamp;
+    OFX::ChoiceParam* _preset;            // effect-gallery pulldown (see kPresets)
+    bool              _applying;          // re-entrancy guard while we stamp a preset
 };
 
 static std::string trimws(const std::string& s)
@@ -374,6 +478,43 @@ static bool validIdent(const std::string& s)
               (c >= '0' && c <= '9') || c == '_')) return false;
     }
     return true;
+}
+
+// Preset pulldown wiring. Two directions, both gated so they never feed back on
+// each other:
+//   * pick a preset  -> stamp its channels/vars/(knobs) into the param fields;
+//   * hand-edit a channel/vars field -> we've diverged, so snap the pulldown back
+//     to "(Custom)" (index 0). Knob edits don't snap: the knobs are the preset's
+//     live controls (k1 = cell size, etc.), meant to be tweaked in place.
+// The _applying flag guards against hosts (Flame) that may report our own
+// setValue() writes as eChangeUserEdit; the reason check keeps project-load
+// value restores (eChangePluginEdit) from spuriously snapping to Custom.
+void ExpressionPlugin::changedParam(const OFX::InstanceChangedArgs& args, const std::string& name)
+{
+    if (_applying) return;
+    if (args.reason != OFX::eChangeUserEdit) return;
+
+    if (name == "preset") {
+        int idx = 0; _preset->getValue(idx);
+        if (idx <= 0 || idx >= kPresetCount) return;   // 0 == (Custom): nothing to apply
+        const Preset& p = kPresets[idx];
+        _applying = true;
+        _exprR->setValue(p.r); _exprG->setValue(p.g);
+        _exprB->setValue(p.b); _exprA->setValue(p.a);
+        _vars->setValue(p.vars ? p.vars : "");
+        if (p.setK) {
+            _k1->setValue(p.k1); _k2->setValue(p.k2);
+            _k3->setValue(p.k3); _k4->setValue(p.k4);
+        }
+        _applying = false;
+        return;
+    }
+
+    if (name == "exprR" || name == "exprG" || name == "exprB" ||
+        name == "exprA" || name == "vars") {
+        int idx = 0; _preset->getValue(idx);
+        if (idx != 0) { _applying = true; _preset->setValue(0); _applying = false; }
+    }
 }
 
 void ExpressionPlugin::buildContext(const OFX::RenderArguments& args, ExprContext& ctx)
@@ -840,6 +981,23 @@ void ExpressionPluginFactory::describeInContext(OFX::ImageEffectDescriptor& desc
     clampOut->setHint("Clamp the result to the 0..1 range (like Nuke's clamp(x)).");
     clampOut->setAnimates(true);
     pgOut->addChild(*clampOut);
+
+    // --- Preset: a gallery pulldown that stamps a whole effect (channels + vars +
+    //     the k1..k4 knobs) into the fields above. Entries mirror PRESETS.md / the
+    //     kPresets table; index 0 "(Custom)" applies nothing and is where the pulldown
+    //     snaps back the moment you hand-edit a channel (see changedParam). Placed
+    //     last so it reads as a "load a starting point" action at the foot of the panel. ---
+    {
+        OFX::ChoiceParamDescriptor* pr = desc.defineChoiceParam("preset");
+        pr->setLabel("Preset");
+        for (int i = 0; i < kPresetCount; ++i) pr->appendOption(kPresets[i].name);
+        pr->setDefault(0);
+        pr->setAnimates(false);
+        pr->setHint("Load a ready-made effect into the fields above. Picking one overwrites "
+                    "r/g/b/a, the Variables block, and the k1..k4 knobs. Hand-editing a "
+                    "channel afterwards resets this to (Custom).");
+        pgOut->addChild(*pr);
+    }
 }
 
 OFX::ImageEffect* ExpressionPluginFactory::createInstance(OfxImageEffectHandle handle, OFX::ContextEnum /*context*/)
