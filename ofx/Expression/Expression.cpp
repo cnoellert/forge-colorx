@@ -317,7 +317,7 @@ static const Preset kPresets[] = {
 
     // --- Technical / UV ---
     { "UV (ST) pass",
-      "x/width", "y/height", "0", "1", "", false, 0,0,0,0 },
+      "(x+0.5)/width", "(y+0.5)/height", "0", "1", "", false, 0,0,0,0 },
     { "Radial gradient",
       "clamp(1 - d/k1)", "clamp(1 - d/k1)", "clamp(1 - d/k1)", "1",
       "d = hypot(cx,cy)", true, 1.0, 0,0,0 },

@@ -327,9 +327,9 @@
       <code>k1..k4</code> are the live sliders; <code>ref</code> is the Reference Colour.</p>
     <div class="presets">
 
-      <div class="card"><div class="ch"><div class="grp">Technical</div><h4>UV (ST) pass</h4><p>Red = horizontal, green = vertical coordinate pass.</p></div>
-        <pre><code><span class="k">r =</span> x/width
-<span class="k">g =</span> y/height
+      <div class="card"><div class="ch"><div class="grp">Technical</div><h4>UV (ST) pass</h4><p>Red = horizontal, green = vertical coordinate pass. <code>+0.5</code> samples each pixel's centre.</p></div>
+        <pre><code><span class="k">r =</span> (x+0.5)/width
+<span class="k">g =</span> (y+0.5)/height
 <span class="k">b =</span> 0
 <span class="k">a =</span> 1</code><button class="copybtn">copy</button></pre></div>
 

@@ -43,10 +43,11 @@ The colour-palette presets use Inigo Quilez's cosine palette,
 ## Technical / UV
 
 ### UV (ST) pass
-The classic red-horizontal / green-vertical coordinate pass.
+The classic red-horizontal / green-vertical coordinate pass. The `+0.5` samples each
+pixel's **centre** (`x` is the integer pixel index), so it's a correct ST/UV map.
 ```
-r = x/width
-g = y/height
+r = (x+0.5)/width
+g = (y+0.5)/height
 b = 0
 a = 1
 ```
