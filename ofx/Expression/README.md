@@ -62,6 +62,13 @@ However you got it — a release download or your own build — you end up with 
 
 The node then appears under **FORGE > color > colorx** (labelled **colorx**).
 
+> **Upgrading from the old "Expression" node?** This release renames the plugin to
+> **colorx** with a new identifier (`com.forge.color.colorx`, was `tv.diff.Expression`).
+> It installs as a **fresh** node, not an in-place update — so **remove the old
+> `Expression.ofx.bundle`** from the OFX plugin path, and be aware that any saved
+> comp/Batch using the old node will show it as **missing**; re-add **colorx** in its
+> place.
+
 On **Linux**, the release ships two bundles: a **RHEL / Flame** build (needs only
 glibc 2.29, loads on Flame's RHEL workstations) and a **modern** build (Ubuntu,
 newer glibc, for recent Resolve etc.). On a RHEL-based Flame box, use the RHEL one.
