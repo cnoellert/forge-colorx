@@ -5,9 +5,9 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>Expression.ofx</string>
+	<string>colorx.ofx</string>
 	<key>CFBundleIdentifier</key>
-	<string>tv.diff.Expression</string>
+	<string>com.forge.color.colorx</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundlePackageType</key>

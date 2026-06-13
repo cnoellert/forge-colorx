@@ -1,4 +1,4 @@
-# Expression — an OpenFX port of Nuke's Expression node
+# colorx — an OpenFX port of Nuke's Expression node
 
 A genuine re-creation of Nuke's **Color > Math > Expression** node as an OpenFX
 plugin. An OFX host gives you real **text fields**, so you type per-channel
@@ -14,7 +14,7 @@ from the node's **Expression syntax** button).
 Expression/
 ├── Expression.cpp   the OFX plugin (params, render, channel dispatch)
 ├── ExprEval.h       self-contained expression compiler/evaluator (no deps)
-├── Makefile         build to Expression.ofx.bundle
+├── Makefile         build to colorx.ofx.bundle
 └── README.md        this file
 ```
 
@@ -33,8 +33,8 @@ git clone https://github.com/AcademySoftwareFoundation/openfx
 cp -r Expression openfx/Support/Plugins/Expression
 cd openfx/Support/Plugins/Expression
 make
-# Linux  -> Expression.ofx.bundle/Contents/Linux-x86-64/Expression.ofx
-# macOS  -> Expression.ofx.bundle/Contents/MacOS/Expression.ofx
+# Linux  -> colorx.ofx.bundle/Contents/Linux-x86-64/colorx.ofx
+# macOS  -> colorx.ofx.bundle/Contents/MacOS/colorx.ofx
 ```
 
 Requirements: a C++11 compiler and `make`. No third-party libraries — the
@@ -43,7 +43,7 @@ expression engine (`ExprEval.h`) is self-contained.
 ## Install
 
 However you got it — a release download or your own build — you end up with an
-`Expression.ofx.bundle`. Install it into the host's OFX plugin path:
+`colorx.ofx.bundle`. Install it into the host's OFX plugin path:
 
 1. **Copy the bundle** to the OFX plugin path (both are root-owned, so use `sudo`):
    - **macOS:** `/Library/OFX/Plugins/`
@@ -55,12 +55,12 @@ However you got it — a release download or your own build — you end up with 
    unsigned bundle it didn't build itself:
 
    ```bash
-   sudo xattr -dr com.apple.quarantine "/Library/OFX/Plugins/Expression.ofx.bundle"
+   sudo xattr -dr com.apple.quarantine "/Library/OFX/Plugins/colorx.ofx.bundle"
    ```
 
 3. **Restart the host application** — OFX plugins are scanned once at launch.
 
-The node then appears under **Color / Math > Expression**.
+The node then appears under **FORGE > color > colorx** (labelled **colorx**).
 
 On **Linux**, the release ships two bundles: a **RHEL / Flame** build (needs only
 glibc 2.29, loads on Flame's RHEL workstations) and a **modern** build (Ubuntu,

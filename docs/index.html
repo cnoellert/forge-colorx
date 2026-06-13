@@ -188,11 +188,11 @@
       <a href="https://github.com/cnoellert/forge-colorx/releases/latest">latest release</a>
       (macOS + Linux), or build from source.</p>
     <ol>
-      <li>Unzip → <code>Expression.ofx.bundle</code>.</li>
+      <li>Unzip → <code>colorx.ofx.bundle</code>.</li>
       <li>Copy it to the OFX plugin path (root-owned — use <code>sudo</code>):
         <code>/Library/OFX/Plugins/</code> on macOS, <code>/usr/OFX/Plugins/</code> on Linux.</li>
       <li><b>macOS only</b> — clear the download quarantine, or the host silently skips it:
-        <pre><code>sudo xattr -dr com.apple.quarantine "/Library/OFX/Plugins/Expression.ofx.bundle"</code><button class="copybtn">copy</button></pre></li>
+        <pre><code>sudo xattr -dr com.apple.quarantine "/Library/OFX/Plugins/colorx.ofx.bundle"</code><button class="copybtn">copy</button></pre></li>
       <li>Restart the host — OFX plugins are scanned at launch.</li>
     </ol>
     <div class="note"><b>Linux:</b> the release ships two builds — a <b>RHEL&nbsp;/&nbsp;Flame</b>

@@ -157,13 +157,13 @@ static inline unsigned short floatToHalf(float f)
     return hm;
 }
 
-#define kPluginName        "Expression"
-#define kPluginGrouping    "Color/Math"
+#define kPluginName        "colorx"
+#define kPluginGrouping    "FORGE/color/colorx"
 #define kPluginDescription "Per-channel math expressions, a re-creation of Nuke's Expression node.\n" \
                            "Variables: r g b a, x y, cx cy, width height, frame (alias t), pi, k1..k4 and\n" \
                            "ref.r/ref.g/ref.b knobs, plus your temps. Mix blends original<->result; Clamp "\
                            "clamps to 0..1."
-#define kPluginIdentifier  "tv.diff.Expression"
+#define kPluginIdentifier  "com.forge.color.colorx"
 #define kPluginVersionMajor 1
 #define kPluginVersionMinor 0
 
