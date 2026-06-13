@@ -199,11 +199,10 @@
       one (needs only glibc&nbsp;2.29, loads on Flame's RHEL boxes) and a <b>modern</b> one
       (Ubuntu, newer glibc). On a RHEL-based Flame workstation, take the RHEL build.</div>
     <div class="note"><b>Upgrading from the old “Expression” node?</b> This release renames the
-      plugin to <b>colorx</b> with a new identifier (<code>com.forge.color.colorx</code>, was
-      <code>tv.diff.Expression</code>). It installs as a <em>fresh</em> node, not an in-place
-      update: <b>delete the old <code>Expression.ofx.bundle</code></b> from the OFX plugin path, and
-      note that any saved comp/Batch using the old node will show it as <b>missing</b> — re-add
-      <b>colorx</b> in its place.</div>
+      node to <b>colorx</b> (menu label + grouping only) — the plugin <b>identifier is
+      unchanged</b>, so it's a <b>drop-in</b> update: existing comps keep working, no re-linking.
+      Just <b>replace</b> the old <code>Expression.ofx.bundle</code> with
+      <code>colorx.ofx.bundle</code> (don't leave both installed — they share one identifier).</div>
   </section>
 
   <section id="model">

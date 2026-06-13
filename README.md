@@ -39,10 +39,10 @@ Grab a prebuilt bundle for macOS or Linux from the
 [**latest release**](https://github.com/cnoellert/forge-colorx/releases/latest), or
 build from source — see the plugin README.
 
-> **Upgrading from the old "Expression" node?** The plugin was renamed to **colorx**
-> with a new identifier (`com.forge.color.colorx`). Remove the old
-> `Expression.ofx.bundle`, and re-add **colorx** in any comp that used the old node
-> (it'll show as missing until you do — the identifier change is intentional).
+> **Upgrading from the old "Expression" node?** The node was renamed to **colorx**
+> (label + menu only); its plugin identifier is unchanged, so it's a **drop-in** update —
+> existing comps keep working, no re-linking. Just replace the old
+> `Expression.ofx.bundle` with `colorx.ofx.bundle` (don't keep both installed).
 
 ## Status
 
