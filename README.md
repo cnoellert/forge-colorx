@@ -3,7 +3,8 @@
 A re-creation of Nuke's **Color > Math > Expression** node as an **OpenFX plugin** —
 real per-channel text fields, parsed and evaluated at run time, so an expression
 behaves just as it does in Nuke. The built `.ofx` loads in **Autodesk Flame (2021+)**,
-DaVinci Resolve/Fusion, Nuke, Natron, and any other OpenFX host.
+DaVinci Resolve/Fusion, Nuke, Natron, and any other OpenFX host. In a host it appears
+as the **colorx** node under **FORGE › color › colorx**.
 
 ```
 forge-colorx/
@@ -37,6 +38,11 @@ built into the Preset pulldown — see [`PRESETS.md`](PRESETS.md).
 Grab a prebuilt bundle for macOS or Linux from the
 [**latest release**](https://github.com/cnoellert/forge-colorx/releases/latest), or
 build from source — see the plugin README.
+
+> **Upgrading from the old "Expression" node?** The node was renamed to **colorx**
+> (label + menu only); its plugin identifier is unchanged, so it's a **drop-in** update —
+> existing comps keep working, no re-linking. Just replace the old
+> `Expression.ofx.bundle` with `colorx.ofx.bundle` (don't keep both installed).
 
 ## Status
 

@@ -1,7 +1,8 @@
-# Expression presets
+# colorx presets
 
-A gallery of ready-to-paste presets for the **Expression** OFX node. Every preset
-here is validated against the expression parser, so it compiles as-is.
+A gallery of ready-to-paste presets for the **colorx** OFX node (it re-creates Nuke's
+Color > Math > Expression node). Every preset here is validated against the expression
+parser, so it compiles as-is.
 
 📖 Browsable version (with the full function library) at
 <https://cnoellert.github.io/forge-colorx/#presets>.

@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Expression — forge-colorx reference</title>
+<title>colorx — forge-colorx reference</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2316181e'/%3E%3Crect x='6' y='6' width='20' height='20' rx='5' fill='%23e87e24'/%3E%3C/svg%3E">
-<meta name="description" content="Reference manual for the Expression OpenFX node — a re-creation of Nuke's Color > Math > Expression. Variables, operators, the function library, and the preset gallery.">
+<meta name="description" content="Reference manual for the colorx OpenFX node (FORGE/color/colorx) — a re-creation of Nuke's Color > Math > Expression. Variables, operators, the function library, and the preset gallery.">
 <style>
   :root{
     --bg:#16181e; --panel:#1e2028; --panel2:#23262f; --surface:#282c34;
@@ -141,7 +141,7 @@
 
 <nav class="side">
   <div class="brand">
-    <div class="logo"><span class="dot"></span><h1>Expression</h1></div>
+    <div class="logo"><span class="dot"></span><h1>colorx</h1></div>
     <div class="sub">forge-colorx · OFX</div>
   </div>
   <a class="nl" href="#overview">Overview</a>
@@ -159,7 +159,7 @@
 
 <main>
   <header class="hero">
-    <h1><span class="accent">Expression</span> reference</h1>
+    <h1><span class="accent">colorx</span> reference</h1>
     <div class="tag">An OpenFX re-creation of Nuke's <b>Color&nbsp;&gt;&nbsp;Math&nbsp;&gt;&nbsp;Expression</b> node —
       per-channel math, parsed and evaluated at run time.</div>
     <div class="pills">
@@ -175,7 +175,7 @@
       (<code>r=</code> <code>g=</code> <code>b=</code> <code>a=</code>) hold math that is compiled once
       per render and evaluated per pixel. It runs as a filter over its source clip and loads in
       <b>Autodesk Flame (2021+)</b>, <b>DaVinci&nbsp;Resolve / Fusion</b>, Nuke, Natron, and any other
-      OpenFX host. The node appears under <b>Color&nbsp;/&nbsp;Math&nbsp;&gt;&nbsp;Expression</b>.</p>
+      OpenFX host. The node appears under <b>FORGE&nbsp;/&nbsp;color&nbsp;/&nbsp;colorx</b> (labelled <b>colorx</b>).</p>
     <p>The panel has four pages: <b>Channels</b> (the r/g/b/a expressions), <b>Variables</b>
       (a block of <code>name = formula</code> statements), <b>Constants</b> (the <code>k1..k4</code>
       knobs + Reference Colour), and <b>Output</b> (Mix, Clamp, and the <a href="#presets">Preset</a>
@@ -188,16 +188,21 @@
       <a href="https://github.com/cnoellert/forge-colorx/releases/latest">latest release</a>
       (macOS + Linux), or build from source.</p>
     <ol>
-      <li>Unzip → <code>Expression.ofx.bundle</code>.</li>
+      <li>Unzip → <code>colorx.ofx.bundle</code>.</li>
       <li>Copy it to the OFX plugin path (root-owned — use <code>sudo</code>):
         <code>/Library/OFX/Plugins/</code> on macOS, <code>/usr/OFX/Plugins/</code> on Linux.</li>
       <li><b>macOS only</b> — clear the download quarantine, or the host silently skips it:
-        <pre><code>sudo xattr -dr com.apple.quarantine "/Library/OFX/Plugins/Expression.ofx.bundle"</code><button class="copybtn">copy</button></pre></li>
+        <pre><code>sudo xattr -dr com.apple.quarantine "/Library/OFX/Plugins/colorx.ofx.bundle"</code><button class="copybtn">copy</button></pre></li>
       <li>Restart the host — OFX plugins are scanned at launch.</li>
     </ol>
     <div class="note"><b>Linux:</b> the release ships two builds — a <b>RHEL&nbsp;/&nbsp;Flame</b>
       one (needs only glibc&nbsp;2.29, loads on Flame's RHEL boxes) and a <b>modern</b> one
       (Ubuntu, newer glibc). On a RHEL-based Flame workstation, take the RHEL build.</div>
+    <div class="note"><b>Upgrading from the old “Expression” node?</b> This release renames the
+      node to <b>colorx</b> (menu label + grouping only) — the plugin <b>identifier is
+      unchanged</b>, so it's a <b>drop-in</b> update: existing comps keep working, no re-linking.
+      Just <b>replace</b> the old <code>Expression.ofx.bundle</code> with
+      <code>colorx.ofx.bundle</code> (don't leave both installed — they share one identifier).</div>
   </section>
 
   <section id="model">

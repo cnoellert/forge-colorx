@@ -157,12 +157,17 @@ static inline unsigned short floatToHalf(float f)
     return hm;
 }
 
-#define kPluginName        "Expression"
-#define kPluginGrouping    "Color/Math"
+#define kPluginName        "colorx"
+#define kPluginGrouping    "FORGE/color/colorx"
 #define kPluginDescription "Per-channel math expressions, a re-creation of Nuke's Expression node.\n" \
                            "Variables: r g b a, x y, cx cy, width height, frame (alias t), pi, k1..k4 and\n" \
                            "ref.r/ref.g/ref.b knobs, plus your temps. Mix blends original<->result; Clamp "\
                            "clamps to 0..1."
+// DO NOT CHANGE. The OFX host matches saved nodes in existing comps/Batch setups by
+// this identifier, so it is the backward-compat key — it deliberately keeps the original
+// "tv.diff.Expression" value even though the node was rebranded to colorx (FORGE/color/
+// colorx). The user-visible name/grouping above are cosmetic and safe to change; this is
+// not. Changing it orphans every existing comp (the node goes missing until re-linked).
 #define kPluginIdentifier  "tv.diff.Expression"
 #define kPluginVersionMajor 1
 #define kPluginVersionMinor 0

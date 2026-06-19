@@ -1,4 +1,4 @@
-# Makefile for the Expression OFX plugin.
+# Makefile for the colorx OFX plugin (FORGE/color/colorx).
 #
 # Easiest build path: drop this folder into the OpenFX Support examples tree so
 # the Support library + bundle rules come for free:
@@ -6,12 +6,12 @@
 #   git clone https://github.com/AcademySoftwareFoundation/openfx
 #   cp -r Expression openfx/Support/Plugins/Expression
 #   cd openfx/Support/Plugins/Expression
-#   make            # -> Expression.ofx.bundle/Contents/<arch>/Expression.ofx
+#   make            # -> colorx.ofx.bundle/Contents/<arch>/colorx.ofx
 #
 # Makefile.master (from the openfx repo) compiles the Support sources listed
 # below and assembles the .ofx.bundle, including its Info.plist.
 
-PLUGINNAME = Expression
+PLUGINNAME = colorx
 
 # Just our plugin object(s). The OFX C++ Support library objects are supplied
 # separately by Makefile.master (as SUPPORTOBJECTS) and linked in automatically.

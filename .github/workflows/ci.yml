@@ -131,7 +131,7 @@ jobs:
       # .ofx.bundle (with its Info.plist and the per-platform arch dir:
       # Contents/Linux-x86-64 or Contents/MacOS). DEBUGFLAG=-O2 optimises while
       # keeping DEBUGNAME=debug so the macOS-only osxDeploy.sh step is skipped.
-      - name: Build Expression.ofx.bundle
+      - name: Build colorx.ofx.bundle
         run: |
           cp -R ofx/Expression openfx/Support/Plugins/Expression
           make -C openfx/Support/Plugins/Expression DEBUGFLAG=-O2
@@ -139,9 +139,9 @@ jobs:
       - name: Locate + sanity-check the bundle
         id: bundle
         run: |
-          BUNDLE=$(find openfx/Support/Plugins/Expression -type d -name 'Expression.ofx.bundle' | head -1)
-          OFX=$(find "$BUNDLE" -type f -name 'Expression.ofx' | head -1)
-          test -n "$OFX" || { echo "::error::no Expression.ofx produced"; exit 1; }
+          BUNDLE=$(find openfx/Support/Plugins/Expression -type d -name 'colorx.ofx.bundle' | head -1)
+          OFX=$(find "$BUNDLE" -type f -name 'colorx.ofx' | head -1)
+          test -n "$OFX" || { echo "::error::no colorx.ofx produced"; exit 1; }
           echo "Built: $OFX"
           file "$OFX"
           # the OFX C entry point must be exported, or no host can load it
@@ -152,6 +152,6 @@ jobs:
       - name: Upload the .ofx.bundle artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Expression.ofx-${{ matrix.name }}
+          name: colorx.ofx-${{ matrix.name }}
           path: ${{ steps.bundle.outputs.bundle }}
           if-no-files-found: error
