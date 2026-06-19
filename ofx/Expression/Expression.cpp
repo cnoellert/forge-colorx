@@ -170,7 +170,7 @@ static inline unsigned short floatToHalf(float f)
 // not. Changing it orphans every existing comp (the node goes missing until re-linked).
 #define kPluginIdentifier  "tv.diff.Expression"
 #define kPluginVersionMajor 1
-#define kPluginVersionMinor 0
+#define kPluginVersionMinor 1
 
 // indices of the fixed predefined variables in the variable buffer. r..frame are
 // per-pixel / per-render; k1..k4 and ref.r/.g/.b are the user-constant knobs
