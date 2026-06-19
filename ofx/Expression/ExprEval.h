@@ -131,6 +131,13 @@ public:
     // Evaluate. `vars` must have varNames.size() entries.
     double eval(const double* vars) const { return root_ < 0 ? 0.0 : evalNode(root_, vars); }
 
+    // Stack-VM evaluate: same result as eval(), but walks a flat opcode tape (built
+    // in compile()) with a value stack instead of recursing the AST. No per-node
+    // function call / vector-index chase. Short-circuit &&,||,?: preserved via jumps,
+    // so it is bit-for-bit eval()-equivalent. Prototype: measured against eval() in
+    // tests/bench_expr.cpp.
+    double evalTape(const double* vars) const;
+
     // Transpile the compiled AST to a C-like expression string over a variable
     // array `v[]`, calling the exh_* helpers from ExprKernel.h. The same string
     // is valid as a CUDA / Metal / GLSL kernel body given the matching prelude;
@@ -169,6 +176,17 @@ private:
 
     static int  binPrec(BinOp op);
     static bool rightAssoc(BinOp op) { return op == B_POW; }
+
+    // --- stack VM (prototype) ---
+    enum OpCode { OP_NUM, OP_VAR, OP_NEG, OP_NOT, OP_BIN, OP_CALL,
+                  OP_JZ, OP_JNZ, OP_JMP };
+    struct Instr { int op; int i; int n; double d; };  // i: var/binop/fid/jmp-target; n: argc
+    std::vector<Instr> tape_;
+    int  emitI(const Instr& in) { tape_.push_back(in); return (int)tape_.size() - 1; }
+    void emitTape(int idx);                 // post-order compile of node `idx`
+    void compileTape();                     // build tape_ from root_ (call after parse)
+    static double applyBin(int op, double a, double b);
+    static double applyCall(FuncId fid, const double* a, int n);
 };
 
 // ---- helpers ----------------------------------------------------------------
@@ -198,13 +216,13 @@ inline bool Program::compile(const std::string& src, const std::vector<std::stri
     skipws();
     if (p_ >= s_.size()) {                 // empty == 0 (Nuke behaviour)
         Node n; n.kind = N_NUM; n.num = 0.0; root_ = newNode(n);
-        ok_ = true; return true;
+        ok_ = true; compileTape(); return true;
     }
     int r = parseTernary();
     if (r < 0) { err = err_; return false; }
     skipws();
     if (p_ < s_.size()) { err = "unexpected trailing characters near '" + s_.substr(p_) + "'"; return false; }
-    root_ = r; ok_ = true; return true;
+    root_ = r; ok_ = true; compileTape(); return true;
 }
 
 // peek the next binary operator without consuming; returns true if one is present
@@ -492,6 +510,155 @@ inline double Program::evalNode(int idx, const double* vars) const {
         }
     }
     return 0.0;
+}
+
+// ---- stack VM: flatten the AST to a postfix opcode tape ---------------------
+// emitTape walks the node post-order, pushing operands before the op that consumes
+// them. Short-circuit &&,||,?: are compiled to conditional jumps so evaluation
+// order matches eval() exactly (the skipped branch is never executed).
+inline void Program::emitTape(int idx) {
+    const Node& n = nodes_[idx];
+    switch (n.kind) {
+        case N_NUM: { Instr in{OP_NUM,0,0,n.num}; emitI(in); return; }
+        case N_VAR: { Instr in{OP_VAR,n.var,0,0}; emitI(in); return; }
+        case N_UNARY:
+            emitTape(n.a);
+            { Instr in{n.op == '-' ? OP_NEG : OP_NOT,0,0,0}; emitI(in); }
+            return;
+        case N_TERNARY: {
+            emitTape(n.a);
+            Instr jz{OP_JZ,0,0,0}; int pjz = emitI(jz);   // pop cond; if 0 -> else
+            emitTape(n.b);
+            Instr jmp{OP_JMP,0,0,0}; int pjmp = emitI(jmp);
+            tape_[pjz].i = (int)tape_.size();              // else target
+            emitTape(n.c);
+            tape_[pjmp].i = (int)tape_.size();             // end target
+            return;
+        }
+        case N_BINARY: {
+            if (n.op == B_AND) {
+                emitTape(n.a);
+                Instr j1{OP_JZ,0,0,0}; int p1 = emitI(j1);
+                emitTape(n.b);
+                Instr j2{OP_JZ,0,0,0}; int p2 = emitI(j2);
+                Instr one{OP_NUM,0,0,1.0}; emitI(one);
+                Instr jmp{OP_JMP,0,0,0}; int pj = emitI(jmp);
+                tape_[p1].i = tape_[p2].i = (int)tape_.size();
+                Instr zero{OP_NUM,0,0,0.0}; emitI(zero);
+                tape_[pj].i = (int)tape_.size();
+                return;
+            }
+            if (n.op == B_OR) {
+                emitTape(n.a);
+                Instr j1{OP_JNZ,0,0,0}; int p1 = emitI(j1);
+                emitTape(n.b);
+                Instr j2{OP_JNZ,0,0,0}; int p2 = emitI(j2);
+                Instr zero{OP_NUM,0,0,0.0}; emitI(zero);
+                Instr jmp{OP_JMP,0,0,0}; int pj = emitI(jmp);
+                tape_[p1].i = tape_[p2].i = (int)tape_.size();
+                Instr one{OP_NUM,0,0,1.0}; emitI(one);
+                tape_[pj].i = (int)tape_.size();
+                return;
+            }
+            emitTape(n.a); emitTape(n.b);
+            { Instr in{OP_BIN,n.op,0,0}; emitI(in); }
+            return;
+        }
+        case N_CALL: {
+            for (size_t i = 0; i < n.args.size(); ++i) emitTape(n.args[i]);
+            Instr in{OP_CALL,(int)n.fid,(int)n.args.size(),0}; emitI(in);
+            return;
+        }
+    }
+}
+
+inline void Program::compileTape() {
+    tape_.clear();
+    if (root_ >= 0) emitTape(root_);
+}
+
+inline double Program::applyBin(int op, double a, double b) {
+    switch (op) {
+        case B_ADD: return a + b;  case B_SUB: return a - b;
+        case B_MUL: return a * b;  case B_DIV: return a / b;
+        case B_MOD: return std::fmod(a, b); case B_POW: return std::pow(a, b);
+        case B_LT: return a <  b ? 1.0 : 0.0; case B_LE: return a <= b ? 1.0 : 0.0;
+        case B_GT: return a >  b ? 1.0 : 0.0; case B_GE: return a >= b ? 1.0 : 0.0;
+        case B_EQ: return a == b ? 1.0 : 0.0; case B_NE: return a != b ? 1.0 : 0.0;
+    }
+    return 0.0;
+}
+
+inline double Program::applyCall(FuncId fid, const double* a, int n) {
+    double a0 = n > 0 ? a[0] : 0.0, a1 = n > 1 ? a[1] : 0.0, a2 = n > 2 ? a[2] : 0.0;
+    switch (fid) {
+        case F_SIN: return std::sin(a0);   case F_COS: return std::cos(a0);
+        case F_TAN: return std::tan(a0);   case F_ASIN: return std::asin(a0);
+        case F_ACOS: return std::acos(a0); case F_ATAN: return std::atan(a0);
+        case F_SINH: return std::sinh(a0); case F_COSH: return std::cosh(a0);
+        case F_TANH: return std::tanh(a0); case F_EXP: return std::exp(a0);
+        case F_LOG: return std::log(a0);   case F_LOG10: return std::log10(a0);
+        case F_LOG2: return std::log(a0)/std::log(2.0); case F_SQRT: return std::sqrt(a0);
+        case F_ABS: return std::fabs(a0);  case F_FLOOR: return std::floor(a0);
+        case F_CEIL: return std::ceil(a0); case F_TRUNC: return (a0 < 0 ? std::ceil(a0) : std::floor(a0));
+        case F_RINT: return std::floor(a0 + 0.5); case F_ROUND: return std::floor(a0 + 0.5);
+        case F_SIGN: return (a0 > 0) - (a0 < 0); case F_RADIANS: return a0 * 0.017453292519943295;
+        case F_DEGREES: return a0 * 57.29577951308232;
+        case F_EXPONENT: return std::floor(std::log2(std::fabs(a0) + 1e-30));
+        case F_MANTISSA: return a0 / std::exp2(std::floor(std::log2(std::fabs(a0) + 1e-30)));
+        case F_POW2: return a0 * a0;
+        case F_POW: return std::pow(a0, a1); case F_ATAN2: return std::atan2(a0, a1);
+        case F_FMOD: return std::fmod(a0, a1); case F_HYPOT: return std::hypot(a0, a1);
+        case F_STEP: return a1 < a0 ? 0.0 : 1.0;
+        case F_LDEXP: return a0 * std::exp2(a1);
+        case F_MIN: { double m = a0; for (int i = 1; i < n; ++i) m = std::min(m, a[i]); return m; }
+        case F_MAX: { double m = a0; for (int i = 1; i < n; ++i) m = std::max(m, a[i]); return m; }
+        case F_CLAMP1: return a0 < 0 ? 0.0 : (a0 > 1 ? 1.0 : a0);
+        case F_CLAMP3: return a0 < a1 ? a1 : (a0 > a2 ? a2 : a0);
+        case F_LERP: return a0 + (a1 - a0) * a2;
+        case F_SMOOTHSTEP: { double t = (a2 - a0) / (a1 - a0); t = t < 0 ? 0 : (t > 1 ? 1 : t); return t * t * (3 - 2 * t); }
+        case F_NOISE1: return ev_noise(a0, 0, 0); case F_NOISE2: return ev_noise(a0, a1, 0);
+        case F_NOISE3: return ev_noise(a0, a1, a2);
+        case F_RANDOM1: return ev_random(a0, 0, 0); case F_RANDOM2: return ev_random(a0, a1, 0);
+        case F_RANDOM3: return ev_random(a0, a1, a2);
+        case F_FBM: case F_TURB: {
+            int oct = (int)a[3]; float lac = (float)a[4], gain = (float)a[5];
+            float x0 = (float)a0, y0 = (float)a1, z0 = (float)a2;
+            float sum = 0.0f, amp = 1.0f, fr = 1.0f;
+            for (int i = 0; i < oct && i < 32; ++i) {
+                float v = ev_pnoise3(x0 * fr, y0 * fr, z0 * fr);
+                sum += amp * (fid == F_TURB ? std::fabs(v) : v);
+                fr *= lac; amp *= gain;
+            }
+            return (double)sum;
+        }
+        case F_FROM_SRGB: return ev_from_sRGB(a0); case F_TO_SRGB: return ev_to_sRGB(a0);
+        case F_FROM_REC709: return ev_from_rec709(a0); case F_TO_REC709: return ev_to_rec709(a0);
+        case F_FROM_BYTE: return ev_from_sRGB(a0 / 255.0); case F_TO_BYTE: return ev_to_sRGB(a0) * 255.0;
+        case F_PI: return 3.141592653589793; case F_E: return 2.718281828459045;
+    }
+    return 0.0;
+}
+
+inline double Program::evalTape(const double* vars) const {
+    double st[256]; int sp = 0;
+    const Instr* T = tape_.data();
+    const int N = (int)tape_.size();
+    for (int pc = 0; pc < N; ++pc) {
+        const Instr& in = T[pc];
+        switch (in.op) {
+            case OP_NUM: st[sp++] = in.d; break;
+            case OP_VAR: st[sp++] = vars[in.i]; break;
+            case OP_NEG: st[sp-1] = -st[sp-1]; break;
+            case OP_NOT: st[sp-1] = (st[sp-1] == 0.0) ? 1.0 : 0.0; break;
+            case OP_JMP: pc = in.i - 1; break;
+            case OP_JZ:  { double v = st[--sp]; if (v == 0.0) pc = in.i - 1; } break;
+            case OP_JNZ: { double v = st[--sp]; if (v != 0.0) pc = in.i - 1; } break;
+            case OP_BIN: { double b = st[--sp], a = st[--sp]; st[sp++] = applyBin(in.i, a, b); } break;
+            case OP_CALL: { double r = applyCall((FuncId)in.i, &st[sp - in.n], in.n); sp -= in.n; st[sp++] = r; } break;
+        }
+    }
+    return sp > 0 ? st[sp-1] : 0.0;
 }
 
 // ---- transpiler: AST -> C-like kernel body over v[] (see ExprKernel.h) -------

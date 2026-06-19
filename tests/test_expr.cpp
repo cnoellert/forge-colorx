@@ -19,6 +19,13 @@ static void check(const char* expr, double expect) {
     bool ok = std::fabs(got - expect) < 1e-6;
     printf("%-40s = %-14g (expect %-14g) %s\n", expr, got, expect, ok ? "ok" : "FAIL");
     if (!ok) fails++;
+    // The stack VM (evalTape) must be bit-for-bit identical to the tree-walk eval().
+    // Guards the render hot path (which uses evalTape) against drift from eval().
+    double gotTape = p.evalTape(&v[0]);
+    if (gotTape != got) {
+        printf("  !! TAPE MISMATCH [%s]: eval=%.17g tape=%.17g\n", expr, got, gotTape);
+        fails++;
+    }
 }
 
 static void checkErr(const char* expr) {
